@@ -1,5 +1,7 @@
 import mineflayer from 'mineflayer';
 import EventEmitter from 'events';
+import dns from 'dns';
+import net from 'net';
 import { AiChatHandler } from './aiChat.js';
 import { ActionExecutor } from './commandHandler.js';
 
@@ -124,7 +126,7 @@ export class BotManager extends EventEmitter {
     };
   }
 
-  connect(serverConfig) {
+  async connect(serverConfig) {
     if (this.state === 'CONNECTING' || this.state === 'CONNECTED' || this.state === 'SPAWNED') {
       this.disconnect();
     }
@@ -135,12 +137,32 @@ export class BotManager extends EventEmitter {
       this.reconnectTimer = null;
     }
 
-    const host = serverConfig.host;
-    const port = Number(serverConfig.port) || 25565;
+    let host = serverConfig.host;
+    let port = Number(serverConfig.port) || 25565;
     const username = (serverConfig.username && serverConfig.username.trim()) || this.settings.defaultUsername || 'AFK_Bot';
     const loginPassword = serverConfig.loginPassword !== undefined ? serverConfig.loginPassword : this.settings.defaultPassword;
     const autoLogin = serverConfig.autoLogin !== undefined ? serverConfig.autoLogin : this.settings.autoLogin;
     const version = serverConfig.version ? serverConfig.version.trim() : false;
+
+    // Check if port is default 25565 and host is a domain (e.g. hyrixsmp3.aternos.me).
+    // Cloud environments (Render, AWS, Docker) often fail to resolve SRV records via internal DNS.
+    // We resolve SRV records explicitly using Google (8.8.8.8) and Cloudflare (1.1.1.1) DNS!
+    if (port === 25565 && net.isIP(host) === 0 && host !== 'localhost') {
+      try {
+        const resolver = new dns.promises.Resolver();
+        resolver.setServers(['8.8.8.8', '1.1.1.1']);
+        const srvRecords = await resolver.resolveSrv(`_minecraft._tcp.${host}`);
+        if (srvRecords && srvRecords.length > 0) {
+          this.emit('log', { type: 'system', text: `Resolved dynamic port via Public DNS: ${srvRecords[0].port}` });
+          port = srvRecords[0].port;
+          if (srvRecords[0].name) {
+            host = srvRecords[0].name;
+          }
+        }
+      } catch (err) {
+        // SRV resolution not found or failed, continue with default
+      }
+    }
 
     this.currentServer = {
       ...serverConfig,
