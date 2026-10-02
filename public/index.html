@@ -52,7 +52,7 @@
         <form id="form-connect" class="compact-form">
           <input type="text" id="inp-host" placeholder="Server IP" required>
           <div class="row">
-            <input type="number" id="inp-port" placeholder="Port" value="25565" required>
+            <input type="number" id="inp-port" placeholder="Port (25565)" value="">
             <input type="text" id="inp-username" placeholder="Username" value="AFK_Bot" required>
           </div>
           <details class="advanced-settings">
@@ -64,7 +64,8 @@
             </div>
           </details>
           <div class="row">
-            <button type="submit" class="btn btn-primary">Connect</button>
+            <button type="submit" id="btn-connect" class="btn btn-primary">Connect</button>
+            <button type="button" id="btn-leave" class="btn btn-danger hidden">Leave Server</button>
             <button type="button" id="btn-bookmark" class="btn btn-secondary">Bookmark</button>
           </div>
         </form>

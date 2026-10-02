@@ -111,6 +111,9 @@ document.querySelectorAll('[data-action]').forEach(btn => {
   btn.onclick = () => socket.emit('bot:action', btn.dataset.action);
 });
 
+const btnConnect = document.getElementById('btn-connect');
+const btnLeave = document.getElementById('btn-leave');
+
 // Socket Events
 socket.on('bot:status', (st) => {
   elStatus.textContent = st.state;
@@ -118,6 +121,13 @@ socket.on('bot:status', (st) => {
   
   const isActive = ['CONNECTING', 'CONNECTED', 'SPAWNED'].includes(st.state);
   btnDisconnect.classList.toggle('hidden', !isActive);
+  
+  // Toggle Connect/Leave buttons in the quick connect form
+  if (btnConnect && btnLeave) {
+    btnConnect.classList.toggle('hidden', isActive);
+    btnLeave.classList.toggle('hidden', !isActive);
+  }
+
   panelTelemetry.classList.toggle('hidden', !isActive);
 
   if (st.health !== undefined) valHealth.textContent = `${st.health}/20`;
@@ -231,6 +241,7 @@ btnBookmark.onclick = async () => {
 };
 
 btnDisconnect.onclick = () => socket.emit('bot:disconnect');
+if (btnLeave) btnLeave.onclick = () => socket.emit('bot:disconnect');
 
 formChat.onsubmit = (e) => {
   e.preventDefault();
