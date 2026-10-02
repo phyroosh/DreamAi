@@ -102,6 +102,7 @@ chkSwing.onchange = syncSettings;
 chkLook.onchange = syncSettings;
 chkJump.onchange = syncSettings;
 chkSneak.onchange = syncSettings;
+inpPermittedUsers.oninput = syncSettings;
 inpPermittedUsers.onchange = syncSettings;
 inpInterval.oninput = () => { valInterval.textContent = inpInterval.value; };
 inpInterval.onchange = syncSettings;

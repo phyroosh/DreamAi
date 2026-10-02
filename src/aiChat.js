@@ -31,8 +31,10 @@ export class AiChatHandler {
     if (!sender || !message) return false;
     if (!this.apiKey) return false;
 
-    // Strict permitted user check (case-sensitive)
-    if (!permittedUsers.includes(sender)) return false;
+    // Strict permitted user check (case-insensitive)
+    const lowerSender = sender.toLowerCase();
+    const isPermitted = permittedUsers.some(u => String(u).trim().toLowerCase() === lowerSender);
+    if (!isPermitted) return false;
 
     const cleanMsg = message.trim().toLowerCase();
     const hasTriggerWord = this.triggerWords.some(word => cleanMsg.includes(word));
