@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Minecraft AFK Bot</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">⛏️ AFK Bot</div>
+    <div class="header-actions">
+      <div id="status-pill" class="status-pill disconnected">Disconnected</div>
+      <button id="btn-settings" class="btn btn-icon" title="Settings">⚙️</button>
+      <button id="btn-disconnect" class="btn btn-danger hidden" title="Disconnect">🛑</button>
+    </div>
+  </header>
+
+  <main class="app-main">
+    <aside class="sidebar">
+      
+      <!-- Telemetry (Hidden when disconnected) -->
+      <section id="panel-telemetry" class="panel hidden">
+        <h3 class="panel-title">Live Status</h3>
+        <div class="stats-grid">
+          <div class="stat-box">
+            <span class="stat-label">Health</span>
+            <span id="val-health" class="stat-value text-red">20/20</span>
+          </div>
+          <div class="stat-box">
+            <span class="stat-label">Food</span>
+            <span id="val-food" class="stat-value text-orange">20/20</span>
+          </div>
+          <div class="stat-box">
+            <span class="stat-label">Pos (X,Y,Z)</span>
+            <span id="val-pos" class="stat-value">--</span>
+          </div>
+          <div class="stat-box">
+            <span class="stat-label">Uptime</span>
+            <span id="val-uptime" class="stat-value">00:00</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Connection Panel -->
+      <section class="panel">
+        <h3 class="panel-title">Quick Connect</h3>
+        <form id="form-connect" class="compact-form">
+          <input type="text" id="inp-host" placeholder="Server IP" required>
+          <div class="row">
+            <input type="number" id="inp-port" placeholder="Port" value="25565" required>
+            <input type="text" id="inp-username" placeholder="Username" value="AFK_Bot" required>
+          </div>
+          <details class="advanced-settings">
+            <summary>Advanced Options</summary>
+            <div class="advanced-content">
+              <input type="text" id="inp-password" placeholder="/login Password" value="209801">
+              <input type="text" id="inp-version" placeholder="MC Version (auto)">
+              <label class="cb-label"><input type="checkbox" id="inp-autologin" checked> Auto-login</label>
+            </div>
+          </details>
+          <div class="row">
+            <button type="submit" class="btn btn-primary">Connect</button>
+            <button type="button" id="btn-bookmark" class="btn btn-secondary">Bookmark</button>
+          </div>
+        </form>
+      </section>
+
+      <!-- Saved Servers -->
+      <section class="panel list-panel">
+        <h3 class="panel-title">Saved Servers</h3>
+        <div id="saved-servers-list" class="server-list">
+          <div class="empty-text">No saved servers.</div>
+        </div>
+      </section>
+    </aside>
+
+    <section class="console-area">
+      <div class="console-header">
+        <div class="tabs">
+          <button class="tab active" data-filter="all">All Logs</button>
+          <button class="tab" data-filter="chat">Chat</button>
+          <button class="tab" data-filter="system">System</button>
+        </div>
+        <button id="btn-clear" class="btn btn-icon btn-sm" title="Clear Logs">🗑️</button>
+      </div>
+      <div id="terminal" class="terminal"></div>
+      <form id="form-chat" class="chat-bar">
+        <input type="text" id="inp-chat" placeholder="Type a chat message or /command..." autocomplete="off">
+        <button type="submit" class="btn btn-primary">Send</button>
+      </form>
+    </section>
+  </main>
+
+  <!-- Settings Modal -->
+  <dialog id="modal-settings" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Bot Settings & Anti-AFK</h2>
+        <button id="btn-close-settings" class="btn-close">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="setting-group">
+          <label class="cb-label toggle-label">
+            <input type="checkbox" id="chk-antiafk" checked>
+            <strong>Enable Anti-AFK</strong>
+          </label>
+          <p class="help-text">Simulates human movements to avoid kicks.</p>
+        </div>
+        
+        <div class="setting-group" id="antiafk-options">
+          <label class="cb-label"><input type="checkbox" id="chk-swing" checked> Arm Swings</label>
+          <label class="cb-label"><input type="checkbox" id="chk-look" checked> Head Looking</label>
+          <label class="cb-label"><input type="checkbox" id="chk-jump"> Small Jumps</label>
+          <label class="cb-label"><input type="checkbox" id="chk-sneak"> Sneaking</label>
+          
+          <div class="slider-group">
+            <label>Action Interval: <span id="val-interval">10</span>s</label>
+            <input type="range" id="inp-interval" min="4" max="60" value="10">
+          </div>
+        </div>
+
+        <div class="setting-group" style="margin-top:8px; border-top:1px solid var(--border); padding-top:12px;">
+          <h4>Manual Actions (Test)</h4>
+          <div class="row" style="margin-top:6px;">
+            <button class="btn btn-secondary btn-sm" data-action="swing">Swing</button>
+            <button class="btn btn-secondary btn-sm" data-action="look">Look</button>
+            <button class="btn btn-secondary btn-sm" data-action="jump">Jump</button>
+          </div>
+        </div>
+
+        <div class="setting-group" style="margin-top:8px; border-top:1px solid var(--border); padding-top:12px;">
+          <h4>🤖 AI Companion (NVIDIA NIM)</h4>
+          <p class="help-text" style="margin-left:0; margin-top:2px;">
+            Replies in chat when <strong>Phyroosh</strong> mentions <strong>GPT</strong> or <strong>Dream</strong>.
+          </p>
+          <div style="font-family:var(--font-mono); font-size:11px; color:#34d399; margin-top:4px;">
+            ● Active & Secured in .env
+          </div>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <script src="/app.js"></script>
+</body>
+</html>
