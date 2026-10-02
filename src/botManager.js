@@ -373,8 +373,8 @@ export class BotManager extends EventEmitter {
   async handlePotentialAiChat(sender, message) {
     if (this.state !== 'SPAWNED' || !this.bot) return;
 
-    // Strict validation: Must be from Phyroosh AND mention GPT or Dream
-    if (!this.aiChat.shouldRespond(sender, message)) return;
+    // Strict validation: Must be from permitted users AND mention GPT or Dream
+    if (!this.aiChat.shouldRespond(sender, message, this.settings.permittedUsers)) return;
 
     this.emit('log', { type: 'system', text: `[AI Triggered] Message from ${sender}: "${message}"` });
 

@@ -136,7 +136,11 @@
         <div class="setting-group" style="margin-top:8px; border-top:1px solid var(--border); padding-top:12px;">
           <h4>🤖 AI Companion (NVIDIA NIM)</h4>
           <p class="help-text" style="margin-left:0; margin-top:2px;">
-            Replies in chat when <strong>Phyroosh</strong> mentions <strong>GPT</strong> or <strong>Dream</strong>.
+            Permitted Users (comma separated, case-sensitive):
+          </p>
+          <input type="text" id="inp-permitted-users" class="compact-input" placeholder="e.g. Phyroosh, Steve" style="width:100%; margin-top:4px; padding:6px; border-radius:4px; border:1px solid var(--border); background:var(--bg-dark); color:var(--text-main);">
+          <p class="help-text" style="margin-left:0; margin-top:6px;">
+            AI triggers when these users mention <strong>GPT</strong> or <strong>Dream</strong>.
           </p>
           <div style="font-family:var(--font-mono); font-size:11px; color:#34d399; margin-top:4px;">
             ● Active & Secured in .env

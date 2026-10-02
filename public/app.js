@@ -39,6 +39,7 @@ const chkJump = document.getElementById('chk-jump');
 const chkSneak = document.getElementById('chk-sneak');
 const inpInterval = document.getElementById('inp-interval');
 const valInterval = document.getElementById('val-interval');
+const inpPermittedUsers = document.getElementById('inp-permitted-users');
 
 let currentFilter = 'all';
 let uptimeSec = 0;
@@ -80,6 +81,9 @@ const syncSettings = () => {
   afkOpts.style.opacity = chkAntiAfk.checked ? '1' : '0.5';
   afkOpts.style.pointerEvents = chkAntiAfk.checked ? 'auto' : 'none';
   
+  const permittedString = inpPermittedUsers.value || 'Phyroosh';
+  const permittedUsers = permittedString.split(',').map(s => s.trim()).filter(Boolean);
+
   socket.emit('settings:update', {
     antiAfkEnabled: chkAntiAfk.checked,
     antiAfkIntervalSec: parseInt(inpInterval.value),
@@ -88,7 +92,8 @@ const syncSettings = () => {
       lookAround: chkLook.checked,
       jump: chkJump.checked,
       sneak: chkSneak.checked
-    }
+    },
+    permittedUsers: permittedUsers
   });
 };
 
@@ -97,6 +102,7 @@ chkSwing.onchange = syncSettings;
 chkLook.onchange = syncSettings;
 chkJump.onchange = syncSettings;
 chkSneak.onchange = syncSettings;
+inpPermittedUsers.onchange = syncSettings;
 inpInterval.oninput = () => { valInterval.textContent = inpInterval.value; };
 inpInterval.onchange = syncSettings;
 
@@ -190,6 +196,9 @@ socket.on('bot:settings', (st) => {
     chkLook.checked = st.antiAfkActions.lookAround !== false;
     chkJump.checked = !!st.antiAfkActions.jump;
     chkSneak.checked = !!st.antiAfkActions.sneak;
+  }
+  if (st.permittedUsers && Array.isArray(st.permittedUsers)) {
+    inpPermittedUsers.value = st.permittedUsers.join(', ');
   }
   syncSettings();
 });
