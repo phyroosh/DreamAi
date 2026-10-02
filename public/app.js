@@ -98,14 +98,23 @@ const syncSettings = () => {
 };
 
 chkAntiAfk.onchange = syncSettings;
+const btnSaveUsers = document.getElementById('btn-save-users');
+const saveIndicator = document.getElementById('save-indicator');
+
 chkSwing.onchange = syncSettings;
 chkLook.onchange = syncSettings;
 chkJump.onchange = syncSettings;
 chkSneak.onchange = syncSettings;
-inpPermittedUsers.oninput = syncSettings;
-inpPermittedUsers.onchange = syncSettings;
 inpInterval.oninput = () => { valInterval.textContent = inpInterval.value; };
 inpInterval.onchange = syncSettings;
+
+if (btnSaveUsers) {
+  btnSaveUsers.onclick = () => {
+    syncSettings();
+    saveIndicator.style.opacity = '1';
+    setTimeout(() => { saveIndicator.style.opacity = '0'; }, 2000);
+  };
+}
 
 document.querySelectorAll('[data-action]').forEach(btn => {
   btn.onclick = () => socket.emit('bot:action', btn.dataset.action);
