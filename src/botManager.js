@@ -338,21 +338,19 @@ export class BotManager extends EventEmitter {
       if (directPlayer) {
         return { username: directPlayer.username, team: directPlayer.team || null };
       }
-
-      // Pattern 4: rawSender is a Team name! Find who is in this team
-      const teamMatchPlayer = Object.values(this.bot.players).find(p => {
-        if (p.team && p.team.toLowerCase() === clean.toLowerCase()) return true;
-        if (p.displayName && p.displayName.toString().toLowerCase().includes(clean.toLowerCase())) return true;
-        return false;
-      });
-      if (teamMatchPlayer) {
-        return { username: teamMatchPlayer.username, team: clean };
-      }
     }
 
-    // Default: if clean is 'harshu' and Phyroosh is known master
+    // Pattern 4: If clean is literally a team name ('harshu' or matching Phyroosh's team),
+    // attribute to permanent owner Phyroosh
     if (clean.toLowerCase() === 'harshu') {
       return { username: 'Phyroosh', team: 'harshu' };
+    }
+
+    if (this.bot && this.bot.players) {
+      const phyroosh = Object.values(this.bot.players).find(p => p.username.toLowerCase() === 'phyroosh');
+      if (phyroosh && phyroosh.team && phyroosh.team.toLowerCase() === clean.toLowerCase()) {
+        return { username: 'Phyroosh', team: clean };
+      }
     }
 
     return { username: clean, team: null };
@@ -438,10 +436,15 @@ export class BotManager extends EventEmitter {
               }
             }
           } else if (meta.name === 'player_chat') {
-            sender = extractText(data.networkName || data.senderName);
-            if (!sender && data.senderUuid) {
+            if (data.senderUuid && bot.players) {
               const p = Object.values(bot.players).find(pl => pl.uuid === data.senderUuid);
               if (p) sender = p.username;
+            }
+            if (!sender && data.senderUuid === '5f0f0818-ef23-3ade-ae93-571e53719fb6') {
+              sender = 'Phyroosh';
+            }
+            if (!sender) {
+              sender = extractText(data.networkName || data.senderName);
             }
             message = data.plainMessage || extractText(data.unsignedChatContent || data.formattedMessage);
             if (data.type) {
@@ -537,9 +540,16 @@ export class BotManager extends EventEmitter {
           console.error("Error parsing packet:", meta.name, e);
         }
 
-        // Final fallback: deterministic UUID for Phyroosh
-        if (!sender && data && data.senderUuid === '5f0f0818-ef23-3ade-ae93-571e53719fb6') {
-          sender = 'Phyroosh';
+        // Final authority: if packet has senderUuid, resolve to exact player
+        if (data && data.senderUuid) {
+          if (data.senderUuid === '5f0f0818-ef23-3ade-ae93-571e53719fb6') {
+            sender = 'Phyroosh';
+          } else if (bot.players) {
+            const matchedPlayer = Object.values(bot.players).find(pl => pl.uuid === data.senderUuid);
+            if (matchedPlayer && matchedPlayer.username) {
+              sender = matchedPlayer.username;
+            }
+          }
         }
 
         if (sender && message && typeof message === 'string' && message.trim()) {
