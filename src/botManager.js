@@ -129,6 +129,7 @@ export class BotManager extends EventEmitter {
   async connect(serverConfig) {
     if (this.state === 'CONNECTING' || this.state === 'CONNECTED' || this.state === 'SPAWNED') {
       this.disconnect();
+      await new Promise(r => setTimeout(r, 1200));
     }
 
     this.manualDisconnect = false;
@@ -137,9 +138,9 @@ export class BotManager extends EventEmitter {
       this.reconnectTimer = null;
     }
 
-    let host = serverConfig.host;
+    let host = (serverConfig.host || '').trim().toLowerCase();
     let port = Number(serverConfig.port) || 25565;
-    const username = (serverConfig.username && serverConfig.username.trim()) || this.settings.defaultUsername || 'AFK_Bot';
+    const username = (serverConfig.username && serverConfig.username.trim()) || this.settings.defaultUsername || 'Dream';
     const loginPassword = serverConfig.loginPassword !== undefined ? serverConfig.loginPassword : this.settings.defaultPassword;
     const autoLogin = serverConfig.autoLogin !== undefined ? serverConfig.autoLogin : this.settings.autoLogin;
     const version = serverConfig.version ? serverConfig.version.trim() : false;
@@ -153,11 +154,11 @@ export class BotManager extends EventEmitter {
         resolver.setServers(['8.8.8.8', '1.1.1.1']);
         const srvRecords = await resolver.resolveSrv(`_minecraft._tcp.${host}`);
         if (srvRecords && srvRecords.length > 0) {
-          this.emit('log', { type: 'system', text: `Resolved dynamic port via Public DNS: ${srvRecords[0].port}` });
           port = srvRecords[0].port;
           if (srvRecords[0].name) {
-            host = srvRecords[0].name;
+            host = srvRecords[0].name.toLowerCase();
           }
+          this.emit('log', { type: 'system', text: `Resolved dynamic port via Public DNS: ${port}` });
         }
       } catch (err) {
         // SRV resolution not found or failed, continue with default
@@ -196,6 +197,19 @@ export class BotManager extends EventEmitter {
 
     try {
       this.bot = mineflayer.createBot(botOptions);
+      
+      // Connection watchdog: if handshake takes longer than 25s, notify and recover
+      const watchdog = setTimeout(() => {
+        if (this.state === 'CONNECTING' && this.bot) {
+          this.emit('log', { type: 'warn', text: 'Server handshake is taking long. Retrying connection...' });
+          this.handleBotError(new Error('Connection handshake timed out after 25s'));
+        }
+      }, 25000);
+
+      this.bot.once('connect', () => clearTimeout(watchdog));
+      this.bot.once('error', () => clearTimeout(watchdog));
+      this.bot.once('end', () => clearTimeout(watchdog));
+
       this.setupBotEvents(loginPassword, autoLogin);
     } catch (err) {
       this.handleBotError(err);
@@ -584,8 +598,9 @@ export class BotManager extends EventEmitter {
       return;
     }
 
-    const delay = (this.settings.autoReconnectDelaySec || 5) * 1000;
-    this.emit('log', { type: 'warn', text: `Auto-reconnecting in ${this.settings.autoReconnectDelaySec || 5}s...` });
+    const delaySec = Math.max(15, this.settings.autoReconnectDelaySec || 15);
+    const delay = delaySec * 1000;
+    this.emit('log', { type: 'warn', text: `Auto-reconnecting in ${delaySec}s...` });
 
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = setTimeout(() => {
