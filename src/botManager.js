@@ -239,6 +239,51 @@ export class BotManager extends EventEmitter {
     }
   }
 
+  resolvePlayerAndTeam(rawSender) {
+    if (!rawSender) return { username: 'Unknown', team: null };
+    const clean = String(rawSender).replace(/§./g, '').trim();
+
+    // Pattern 1: [team] username or [team]username
+    const bracketMatch = clean.match(/^\[([^\]]+)\]\s*([a-zA-Z0-9_]{3,16})$/i);
+    if (bracketMatch) {
+      return { team: bracketMatch[1].trim(), username: bracketMatch[2].trim() };
+    }
+
+    // Pattern 2: team username (space separated)
+    const spaceMatch = clean.match(/^([a-zA-Z0-9_]+)\s+([a-zA-Z0-9_]{3,16})$/i);
+    if (spaceMatch) {
+      const secondWord = spaceMatch[2].trim();
+      if (this.bot && this.bot.players && Object.values(this.bot.players).some(p => p.username.toLowerCase() === secondWord.toLowerCase())) {
+        return { team: spaceMatch[1].trim(), username: secondWord };
+      }
+    }
+
+    // Pattern 3: direct match with online player
+    if (this.bot && this.bot.players) {
+      const directPlayer = Object.values(this.bot.players).find(p => p.username.toLowerCase() === clean.toLowerCase());
+      if (directPlayer) {
+        return { username: directPlayer.username, team: directPlayer.team || null };
+      }
+
+      // Pattern 4: rawSender is a Team name! Find who is in this team
+      const teamMatchPlayer = Object.values(this.bot.players).find(p => {
+        if (p.team && p.team.toLowerCase() === clean.toLowerCase()) return true;
+        if (p.displayName && p.displayName.toString().toLowerCase().includes(clean.toLowerCase())) return true;
+        return false;
+      });
+      if (teamMatchPlayer) {
+        return { username: teamMatchPlayer.username, team: clean };
+      }
+    }
+
+    // Default: if clean is 'harshu' and Phyroosh is known master
+    if (clean.toLowerCase() === 'harshu') {
+      return { username: 'Phyroosh', team: 'harshu' };
+    }
+
+    return { username: clean, team: null };
+  }
+
   setupBotEvents(loginPassword, autoLogin) {
     const bot = this.bot;
     let autoLogged = false;
@@ -353,9 +398,20 @@ export class BotManager extends EventEmitter {
 
         if (sender && message && typeof message === 'string' && message.trim()) {
           const cleanMsg = message.replace(/§./g, '').trim();
-          if (this.emitChat(sender, cleanMsg)) {
-            this.addChatToRecentLog(sender, cleanMsg);
-            this.handlePotentialAiChat(sender, cleanMsg);
+          
+          // Dissect sender into real player username vs team prefix
+          const identity = this.resolvePlayerAndTeam(sender);
+          const resolvedUsername = identity.username;
+          const resolvedTeam = identity.team;
+
+          // For the UI chat tag, show [team] username if team exists, or username
+          const displayTag = resolvedTeam && resolvedUsername.toLowerCase() !== resolvedTeam.toLowerCase()
+            ? `[${resolvedTeam}] ${resolvedUsername}`
+            : resolvedUsername;
+
+          if (this.emitChat(displayTag, cleanMsg)) {
+            this.addChatToRecentLog(displayTag, cleanMsg);
+            this.handlePotentialAiChat(resolvedUsername, cleanMsg, resolvedTeam);
           }
         }
       });
@@ -428,26 +484,34 @@ export class BotManager extends EventEmitter {
     });
   }
 
-  async handlePotentialAiChat(sender, message) {
+  async handlePotentialAiChat(sender, message, team = null) {
     if (this.state !== 'SPAWNED' || !this.bot) return;
 
     const permitted = this.settings.permittedUsers || ['Phyroosh', 'voult995', 'harshu'];
     const cleanMsg = message.trim().toLowerCase();
     const hasTriggerWord = this.aiChat.triggerWords.some(word => cleanMsg.includes(word));
     const lowerSender = sender.toLowerCase().trim();
+    const lowerTeam = team ? team.toLowerCase().trim() : null;
+
     const isPermitted = permitted.some(u => {
       const p = String(u).trim().toLowerCase();
-      return p === lowerSender || lowerSender.includes(p) || p.includes(lowerSender);
+      if (p === lowerSender || lowerSender.includes(p)) return true;
+      if (lowerTeam && (p === lowerTeam || lowerTeam.includes(p))) return true;
+      return false;
     });
 
     if (hasTriggerWord && !isPermitted) {
-      this.emit('log', { type: 'system', text: `[AI Ignored] "${sender}" called GPT/Dream, but is not in the Permitted Users list!` });
+      const label = team ? `"${sender}" (Team: ${team})` : `"${sender}"`;
+      this.emit('log', { type: 'system', text: `[AI Ignored] ${label} called GPT/Dream, but neither the player nor team is in Permitted Users list!` });
       return;
     }
 
     if (!isPermitted || !hasTriggerWord) return;
 
-    this.emit('log', { type: 'system', text: `[AI Triggered] Message from ${sender}: "${message}"` });
+    const logLabel = team && sender.toLowerCase() !== team.toLowerCase()
+      ? `${sender} [Team: ${team}]`
+      : sender;
+    this.emit('log', { type: 'system', text: `[AI Triggered] Message from ${logLabel}: "${message}"` });
 
     const context = this.getBotContext();
     const chatLog = this.recentChatLog.slice(-15).join('\n');
