@@ -28,7 +28,7 @@ const DEFAULT_SETTINGS = {
   },
   autoReconnect: true,
   autoReconnectDelaySec: 15,
-  permittedUsers: ['Phyroosh', 'voult995', 'harshu']
+  permittedUsers: ['Phyroosh']
 };
 
 export function getSettings() {

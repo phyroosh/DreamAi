@@ -631,7 +631,7 @@ export class BotManager extends EventEmitter {
   async handlePotentialAiChat(sender, message, team = null, isWhisper = false) {
     if (this.state !== 'SPAWNED' || !this.bot) return;
 
-    const permitted = this.settings.permittedUsers || ['Phyroosh', 'voult995', 'harshu'];
+    const permitted = this.settings.permittedUsers || ['Phyroosh'];
     const cleanMsg = message.trim().toLowerCase();
     
     // Check if the message asks to whisper or if it was received as a private message
@@ -651,13 +651,10 @@ export class BotManager extends EventEmitter {
     const hasTriggerWord = mentionsTriggerWord || shouldWhisperReply;
 
     const lowerSender = sender.toLowerCase().trim();
-    const lowerTeam = team ? team.toLowerCase().trim() : null;
 
     const isPermitted = permitted.some(u => {
       const p = String(u).trim().toLowerCase();
-      if (p === lowerSender || lowerSender.includes(p)) return true;
-      if (lowerTeam && (p === lowerTeam || lowerTeam.includes(p))) return true;
-      return false;
+      return p === lowerSender || lowerSender.includes(p);
     });
 
     if (hasTriggerWord && !isPermitted) {
