@@ -40,6 +40,13 @@ const chkSneak = document.getElementById('chk-sneak');
 const inpInterval = document.getElementById('inp-interval');
 const valInterval = document.getElementById('val-interval');
 const inpPermittedUsers = document.getElementById('inp-permitted-users');
+const btnSaveUsers = document.getElementById('btn-save-users');
+const saveIndicator = document.getElementById('save-indicator');
+const modalAllowedUsers = document.getElementById('modal-allowed-users');
+
+const homeAllowedUsers = document.getElementById('home-allowed-users');
+const formHomeUser = document.getElementById('form-home-user');
+const inpHomeUser = document.getElementById('inp-home-user');
 
 let currentFilter = 'all';
 let uptimeSec = 0;
@@ -73,6 +80,50 @@ const appendLog = (senderTag, text, type, category = 'system', customTime = null
   terminal.scrollTop = terminal.scrollHeight;
 };
 
+// Allowed Users UI Renderer
+function renderAllowedUsers(users = []) {
+  const guestList = (users || []).filter(u => u && u.toLowerCase() !== 'phyroosh');
+
+  // 1. Render on Home Page Sidebar
+  if (homeAllowedUsers) {
+    if (guestList.length === 0) {
+      homeAllowedUsers.innerHTML = `<div class="empty-text">No guest users added.<br>Only <strong>Phyroosh</strong> has permission.</div>`;
+    } else {
+      homeAllowedUsers.innerHTML = '';
+      guestList.forEach(u => {
+        const item = document.createElement('div');
+        item.className = 'user-list-item';
+        item.innerHTML = `
+          <div class="user-item-info">
+            <span class="user-item-icon">👤</span>
+            <span class="user-item-name">${u}</span>
+          </div>
+          <button class="btn-del-user" data-user="${u}" title="Remove permission">🗑️</button>
+        `;
+        homeAllowedUsers.appendChild(item);
+      });
+    }
+  }
+
+  // 2. Render inside Settings Modal
+  if (modalAllowedUsers) {
+    if (guestList.length === 0) {
+      modalAllowedUsers.innerHTML = `<span style="font-size:11px; color:var(--text-muted);">None (only Phyroosh has permission)</span>`;
+    } else {
+      modalAllowedUsers.innerHTML = '';
+      guestList.forEach(u => {
+        const chip = document.createElement('div');
+        chip.className = 'user-chip';
+        chip.innerHTML = `
+          <span>${u}</span>
+          <button class="chip-del" data-user="${u}" title="Remove">✕</button>
+        `;
+        modalAllowedUsers.appendChild(chip);
+      });
+    }
+  }
+}
+
 // Settings Modal
 btnSettings.onclick = () => modalSettings.showModal();
 btnCloseSettings.onclick = () => modalSettings.close();
@@ -81,9 +132,6 @@ const syncSettings = () => {
   afkOpts.style.opacity = chkAntiAfk.checked ? '1' : '0.5';
   afkOpts.style.pointerEvents = chkAntiAfk.checked ? 'auto' : 'none';
   
-  const permittedString = inpPermittedUsers.value || 'Phyroosh';
-  const permittedUsers = permittedString.split(',').map(s => s.trim()).filter(Boolean);
-
   socket.emit('settings:update', {
     antiAfkEnabled: chkAntiAfk.checked,
     antiAfkIntervalSec: parseInt(inpInterval.value),
@@ -92,15 +140,11 @@ const syncSettings = () => {
       lookAround: chkLook.checked,
       jump: chkJump.checked,
       sneak: chkSneak.checked
-    },
-    permittedUsers: permittedUsers
+    }
   });
 };
 
 chkAntiAfk.onchange = syncSettings;
-const btnSaveUsers = document.getElementById('btn-save-users');
-const saveIndicator = document.getElementById('save-indicator');
-
 chkSwing.onchange = syncSettings;
 chkLook.onchange = syncSettings;
 chkJump.onchange = syncSettings;
@@ -108,13 +152,50 @@ chkSneak.onchange = syncSettings;
 inpInterval.oninput = () => { valInterval.textContent = inpInterval.value; };
 inpInterval.onchange = syncSettings;
 
+// Handle Adding Users from Home Page Form
+if (formHomeUser) {
+  formHomeUser.onsubmit = (e) => {
+    e.preventDefault();
+    const val = inpHomeUser.value.trim();
+    if (!val) return;
+    socket.emit('permitted:add', val);
+    inpHomeUser.value = '';
+  };
+}
+
+// Handle Adding Users from Settings Modal
 if (btnSaveUsers) {
-  btnSaveUsers.onclick = () => {
-    syncSettings();
+  btnSaveUsers.onclick = (e) => {
+    e.preventDefault();
+    const val = inpPermittedUsers.value.trim();
+    if (val) {
+      socket.emit('permitted:add', val);
+      inpPermittedUsers.value = '';
+    }
     saveIndicator.style.opacity = '1';
     setTimeout(() => { saveIndicator.style.opacity = '0'; }, 2000);
   };
 }
+
+if (inpPermittedUsers) {
+  inpPermittedUsers.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      btnSaveUsers.click();
+    }
+  });
+}
+
+// Handle Deleting Users (Delegated to document for home list & modal chips)
+document.addEventListener('click', (e) => {
+  const delBtn = e.target.closest('.btn-del-user') || e.target.closest('.chip-del');
+  if (delBtn) {
+    const user = delBtn.dataset.user;
+    if (user) {
+      socket.emit('permitted:remove', user);
+    }
+  }
+});
 
 document.querySelectorAll('[data-action]').forEach(btn => {
   btn.onclick = () => socket.emit('bot:action', btn.dataset.action);
@@ -211,16 +292,17 @@ socket.on('bot:settings', (st) => {
   chkAntiAfk.checked = !!st.antiAfkEnabled;
   inpInterval.value = st.antiAfkIntervalSec || 10;
   valInterval.textContent = inpInterval.value;
-  if(st.antiAfkActions) {
+  if (st.antiAfkActions) {
     chkSwing.checked = st.antiAfkActions.swingArm !== false;
     chkLook.checked = st.antiAfkActions.lookAround !== false;
     chkJump.checked = !!st.antiAfkActions.jump;
     chkSneak.checked = !!st.antiAfkActions.sneak;
   }
-  if (st.permittedUsers && Array.isArray(st.permittedUsers)) {
-    inpPermittedUsers.value = st.permittedUsers.join(', ');
+  if (afkOpts) {
+    afkOpts.style.opacity = chkAntiAfk.checked ? '1' : '0.5';
+    afkOpts.style.pointerEvents = chkAntiAfk.checked ? 'auto' : 'none';
   }
-  syncSettings();
+  renderAllowedUsers(st.permittedUsers);
 });
 
 // UI Actions

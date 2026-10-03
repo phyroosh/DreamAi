@@ -13,7 +13,8 @@ if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
-// Initial settings default
+// Initial settings default: permittedUsers stores guest/additional allowed users.
+// Phyroosh is hardcoded as the permanent root owner in the backend.
 const DEFAULT_SETTINGS = {
   defaultUsername: 'Dream',
   defaultPassword: '209801',
@@ -28,8 +29,24 @@ const DEFAULT_SETTINGS = {
   },
   autoReconnect: true,
   autoReconnectDelaySec: 15,
-  permittedUsers: ['Phyroosh']
+  permittedUsers: []
 };
+
+function sanitizeGuestUsers(users) {
+  if (!Array.isArray(users)) return [];
+  const seen = new Set();
+  const result = [];
+  for (const u of users) {
+    const clean = String(u || '').trim();
+    if (!clean || clean.toLowerCase() === 'phyroosh') continue;
+    const lower = clean.toLowerCase();
+    if (!seen.has(lower)) {
+      seen.add(lower);
+      result.push(clean);
+    }
+  }
+  return result;
+}
 
 export function getSettings() {
   try {
@@ -42,7 +59,10 @@ export function getSettings() {
       fs.writeFileSync(SETTINGS_FILE, JSON.stringify(DEFAULT_SETTINGS, null, 2));
       return { ...DEFAULT_SETTINGS };
     }
-    return { ...DEFAULT_SETTINGS, ...JSON.parse(data) };
+    const parsed = JSON.parse(data);
+    const settings = { ...DEFAULT_SETTINGS, ...parsed };
+    settings.permittedUsers = sanitizeGuestUsers(settings.permittedUsers);
+    return settings;
   } catch (err) {
     console.error('Error reading settings, resetting to defaults:', err.message);
     fs.writeFileSync(SETTINGS_FILE, JSON.stringify(DEFAULT_SETTINGS, null, 2));
@@ -54,6 +74,9 @@ export function saveSettings(settings) {
   try {
     const current = getSettings();
     const updated = { ...current, ...settings };
+    if (updated.permittedUsers !== undefined) {
+      updated.permittedUsers = sanitizeGuestUsers(updated.permittedUsers);
+    }
     fs.writeFileSync(SETTINGS_FILE, JSON.stringify(updated, null, 2));
     return updated;
   } catch (err) {

@@ -84,6 +84,34 @@ export class BotManager extends EventEmitter {
     this.emit('settings', this.settings);
   }
 
+  addPermittedUsers(users) {
+    const rawList = Array.isArray(users) ? users : String(users || '').split(',');
+    const current = (this.settings.permittedUsers || []).filter(u => u && u.toLowerCase() !== 'phyroosh');
+    const updated = [...current];
+
+    for (const item of rawList) {
+      const clean = String(item || '').trim();
+      if (!clean || clean.toLowerCase() === 'phyroosh') continue;
+      if (!updated.some(u => u.toLowerCase() === clean.toLowerCase())) {
+        updated.push(clean);
+      }
+    }
+
+    this.updateSettings({ permittedUsers: updated });
+    return updated;
+  }
+
+  removePermittedUser(username) {
+    const cleanTarget = String(username || '').trim().toLowerCase();
+    if (cleanTarget === 'phyroosh') {
+      return this.settings.permittedUsers || [];
+    }
+    const current = (this.settings.permittedUsers || []).filter(u => u && u.toLowerCase() !== 'phyroosh');
+    const updated = current.filter(u => u.trim().toLowerCase() !== cleanTarget);
+    this.updateSettings({ permittedUsers: updated });
+    return updated;
+  }
+
   getBotContext() {
     if (!this.bot || !this.bot.entity) return 'Bot status: Not spawned yet';
     const pos = this.bot.entity.position;
@@ -578,10 +606,9 @@ export class BotManager extends EventEmitter {
       this.emit('log', { type: 'system', text: 'Bot spawned into the Minecraft world!' });
 
       if (this.aiChat.apiKey) {
-        const users = (this.settings.permittedUsers && this.settings.permittedUsers.length)
-          ? this.settings.permittedUsers.join(', ')
-          : 'Phyroosh';
-        this.emit('log', { type: 'system', text: `🤖 Chat-Aware AI active: Ready for natural conversation and orders from [${users}] (GPT/Dream)!` });
+        const guests = (this.settings.permittedUsers || []).filter(u => u && u.toLowerCase() !== 'phyroosh');
+        const userSummary = guests.length > 0 ? `Phyroosh (Owner) + [${guests.join(', ')}]` : `Phyroosh (Owner)`;
+        this.emit('log', { type: 'system', text: `🤖 Chat-Aware AI active: Ready for natural conversation and orders from ${userSummary} (GPT/Dream)!` });
       }
 
       if (autoLogin && loginPassword && !autoLogged) {
@@ -631,7 +658,15 @@ export class BotManager extends EventEmitter {
   async handlePotentialAiChat(sender, message, team = null, isWhisper = false) {
     if (this.state !== 'SPAWNED' || !this.bot) return;
 
-    const permitted = this.settings.permittedUsers || ['Phyroosh'];
+    const lowerSender = sender.toLowerCase().trim();
+    const isOwner = lowerSender === 'phyroosh' || lowerSender.includes('phyroosh') || 'phyroosh'.includes(lowerSender);
+    const guestUsers = (this.settings.permittedUsers || []).filter(u => u && u.toLowerCase() !== 'phyroosh');
+    const isGuest = guestUsers.some(u => {
+      const p = String(u).trim().toLowerCase();
+      return p === lowerSender || lowerSender.includes(p) || p.includes(lowerSender);
+    });
+    const isPermitted = isOwner || isGuest;
+
     const cleanMsg = message.trim().toLowerCase();
     
     // Check if the message asks to whisper or if it was received as a private message
@@ -649,13 +684,6 @@ export class BotManager extends EventEmitter {
     // In a direct private whisper to the bot, the user ALREADY addressed the bot directly!
     const mentionsTriggerWord = this.aiChat.triggerWords.some(word => cleanMsg.includes(word));
     const hasTriggerWord = mentionsTriggerWord || shouldWhisperReply;
-
-    const lowerSender = sender.toLowerCase().trim();
-
-    const isPermitted = permitted.some(u => {
-      const p = String(u).trim().toLowerCase();
-      return p === lowerSender || lowerSender.includes(p);
-    });
 
     if (hasTriggerWord && !isPermitted) {
       const label = team ? `"${sender}" (Team: ${team})` : `"${sender}"`;

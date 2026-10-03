@@ -78,6 +78,24 @@
           <div class="empty-text">No saved servers.</div>
         </div>
       </section>
+
+      <!-- Allowed AI Users Panel -->
+      <section class="panel list-panel">
+        <div class="panel-header-row">
+          <h3 class="panel-title">Allowed Users</h3>
+          <span class="owner-pill" title="Permanent Root Owner">👑 Phyroosh</span>
+        </div>
+        <p class="panel-desc">Save usernames allowed to talk to & command the AI.</p>
+        
+        <form id="form-home-user" class="add-user-form">
+          <input type="text" id="inp-home-user" placeholder="Username(s) e.g. Alex, Steve" autocomplete="off" required>
+          <button type="submit" id="btn-home-save-user" class="btn btn-primary btn-sm">Save</button>
+        </form>
+
+        <div id="home-allowed-users" class="allowed-users-list">
+          <div class="empty-text">No guest users added.<br>Only <strong>Phyroosh</strong> has permission.</div>
+        </div>
+      </section>
     </aside>
 
     <section class="console-area">
@@ -135,21 +153,29 @@
         </div>
 
         <div class="setting-group" style="margin-top:8px; border-top:1px solid var(--border); padding-top:12px;">
-          <h4>🤖 AI Companion (NVIDIA NIM)</h4>
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <h4>🤖 AI Companion Permissions</h4>
+            <span class="owner-pill" title="Permanent Backend Root Owner">👑 Phyroosh (Owner)</span>
+          </div>
           <p class="help-text" style="margin-left:0; margin-top:2px;">
-            Permitted Users (comma separated, case-insensitive):
+            Save multiple usernames (comma-separated or one by one):
           </p>
-          <div style="display:flex; gap:8px; align-items:center; margin-top:4px;">
-            <input type="text" id="inp-permitted-users" class="compact-input" placeholder="e.g. Phyroosh, Steve" style="flex-grow:1; padding:6px; border-radius:4px; border:1px solid var(--border); background:var(--bg-dark); color:var(--text-main);">
-            <button id="btn-save-users" class="btn btn-secondary btn-sm">Save</button>
+          <div style="display:flex; gap:8px; align-items:center; margin-top:6px;">
+            <input type="text" id="inp-permitted-users" class="compact-input" placeholder="e.g. Alex, Steve, Notch" style="flex-grow:1; padding:6px; border-radius:4px; border:1px solid var(--border); background:var(--bg-dark); color:var(--text-main);">
+            <button id="btn-save-users" class="btn btn-primary btn-sm">Save</button>
             <span id="save-indicator" style="color:#34d399; font-size:12px; opacity:0; transition:opacity 0.3s;">Saved!</span>
           </div>
-          <p class="help-text" style="margin-left:0; margin-top:6px;">
-            AI triggers when these users mention <strong>GPT</strong> or <strong>Dream</strong>.
-          </p>
-          <div style="font-family:var(--font-mono); font-size:11px; color:#34d399; margin-top:4px;">
-            ● Active & Secured in .env
+
+          <div style="margin-top:10px;">
+            <label style="font-size:11px; font-weight:600; color:var(--text-muted); text-transform:uppercase;">Active Allowed Users</label>
+            <div id="modal-allowed-users" class="allowed-users-chips" style="margin-top:6px;">
+              <span style="font-size:11px; color:var(--text-muted);">None (only Phyroosh has permission)</span>
+            </div>
           </div>
+
+          <p class="help-text" style="margin-left:0; margin-top:8px;">
+            <strong>Phyroosh</strong> is permanent root owner. Allowed users can speak to AI via <strong>GPT</strong>, <strong>Dream</strong>, or private whispers.
+          </p>
         </div>
       </div>
     </div>

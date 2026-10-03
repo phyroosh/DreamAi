@@ -279,3 +279,121 @@ details.advanced-settings summary { cursor: pointer; user-select: none; padding:
 .help-text { font-size: 11px; color: var(--text-muted); margin-top: -4px; margin-left: 22px; }
 .slider-group { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; font-size: 11px; }
 .slider-group input[type="range"] { width: 100%; accent-color: var(--accent); }
+
+/* Allowed Users Components */
+.panel-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.panel-header-row .panel-title { margin-bottom: 0; }
+.panel-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+  line-height: 1.35;
+}
+.owner-pill {
+  font-size: 10px;
+  font-weight: 600;
+  background: rgba(52, 211, 153, 0.12);
+  color: #34d399;
+  border: 1px solid rgba(52, 211, 153, 0.25);
+  padding: 2px 7px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  letter-spacing: 0.3px;
+}
+.add-user-form {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.add-user-form input {
+  flex: 1;
+  min-width: 0;
+}
+.allowed-users-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  overflow-y: auto;
+  max-height: 150px;
+  padding-right: 2px;
+}
+.user-list-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 8px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--rad);
+  font-size: 12px;
+}
+.user-list-item:hover {
+  border-color: var(--text-muted);
+}
+.user-item-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+}
+.btn-del-user {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 3px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  transition: 0.15s ease;
+}
+.btn-del-user:hover {
+  color: var(--danger);
+  background: rgba(239, 68, 68, 0.12);
+}
+.allowed-users-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 28px;
+  align-items: center;
+}
+.user-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 3px 8px 3px 10px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text-main);
+}
+.chip-del {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  transition: 0.15s ease;
+}
+.chip-del:hover {
+  color: var(--danger);
+  background: rgba(239, 68, 68, 0.15);
+}

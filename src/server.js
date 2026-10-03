@@ -216,6 +216,46 @@ io.on('connection', (socket) => {
     }
   });
   socket.on('settings:update', (data) => botManager.updateSettings(data));
+  socket.on('permitted:add', (users) => {
+    try {
+      const updated = botManager.addPermittedUsers(users);
+      io.emit('bot:settings', storage.getSettings());
+      const label = Array.isArray(users) ? users.join(', ') : users;
+      io.emit('bot:log', { type: 'system', text: `[Permissions] Added allowed user(s): ${label}` });
+    } catch (e) {
+      socket.emit('bot:log', { type: 'error', text: e.message });
+    }
+  });
+  socket.on('permitted:remove', (user) => {
+    try {
+      botManager.removePermittedUser(user);
+      io.emit('bot:settings', storage.getSettings());
+      io.emit('bot:log', { type: 'system', text: `[Permissions] Removed user: ${user}` });
+    } catch (e) {
+      socket.emit('bot:log', { type: 'error', text: e.message });
+    }
+  });
+});
+
+app.post('/api/permitted-users', (req, res) => {
+  try {
+    const { users } = req.body;
+    const updated = botManager.addPermittedUsers(users);
+    io.emit('bot:settings', storage.getSettings());
+    res.json({ success: true, permittedUsers: updated });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/permitted-users/:username', (req, res) => {
+  try {
+    const updated = botManager.removePermittedUser(req.params.username);
+    io.emit('bot:settings', storage.getSettings());
+    res.json({ success: true, permittedUsers: updated });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 server.listen(PORT, '0.0.0.0', () => {
