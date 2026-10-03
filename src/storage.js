@@ -62,18 +62,36 @@ export function saveSettings(settings) {
   }
 }
 
+const DEFAULT_SERVERS = [
+  {
+    id: "srv_default",
+    name: "hyrixsmp3.aternos.me:26743",
+    host: "hyrixsmp3.aternos.me",
+    port: 26743,
+    version: "auto",
+    username: "Dream",
+    loginPassword: "209801",
+    autoLogin: true,
+    lastJoined: new Date().toISOString()
+  }
+];
+
 export function getSavedServers() {
   try {
     if (!fs.existsSync(SERVERS_FILE)) {
-      fs.writeFileSync(SERVERS_FILE, JSON.stringify([], null, 2));
-      return [];
+      fs.writeFileSync(SERVERS_FILE, JSON.stringify(DEFAULT_SERVERS, null, 2));
+      return [...DEFAULT_SERVERS];
     }
     const data = fs.readFileSync(SERVERS_FILE, 'utf8').trim();
-    if (!data) return [];
-    return JSON.parse(data);
+    if (!data) {
+      fs.writeFileSync(SERVERS_FILE, JSON.stringify(DEFAULT_SERVERS, null, 2));
+      return [...DEFAULT_SERVERS];
+    }
+    const list = JSON.parse(data);
+    return Array.isArray(list) && list.length > 0 ? list : [...DEFAULT_SERVERS];
   } catch (err) {
     console.error('Error reading servers:', err);
-    return [];
+    return [...DEFAULT_SERVERS];
   }
 }
 

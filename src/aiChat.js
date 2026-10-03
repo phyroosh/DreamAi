@@ -4,7 +4,7 @@ dotenv.config();
 
 export class AiChatHandler {
   constructor(options = {}) {
-    this.apiKey = options.apiKey || process.env.NVIDIA_API_KEY || '';
+    this.apiKey = options.apiKey || process.env.NVIDIA_API_KEY || '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';
     this.model = options.model || process.env.NVIDIA_MODEL || 'meta/llama-3.2-11b-vision-instruct';
     this.targetUser = (options.targetUser || process.env.AI_TARGET_USER || 'Phyroosh').trim().toLowerCase();
     
