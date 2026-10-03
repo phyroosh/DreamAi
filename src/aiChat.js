@@ -31,9 +31,12 @@ export class AiChatHandler {
     if (!sender || !message) return false;
     if (!this.apiKey) return false;
 
-    // Strict permitted user check (case-insensitive)
-    const lowerSender = sender.toLowerCase();
-    const isPermitted = permittedUsers.some(u => String(u).trim().toLowerCase() === lowerSender);
+    // Strict permitted user check (case-insensitive & whitespace trimmed)
+    const lowerSender = sender.toLowerCase().trim();
+    const isPermitted = permittedUsers.some(u => {
+      const p = String(u).trim().toLowerCase();
+      return p === lowerSender || lowerSender.includes(p) || p.includes(lowerSender);
+    });
     if (!isPermitted) return false;
 
     const cleanMsg = message.trim().toLowerCase();
@@ -103,7 +106,10 @@ export class AiChatHandler {
         this.history = this.history.slice(-6);
       }
 
-      const systemPrompt = `You are an intelligent, friendly, completely natural Minecraft companion in-game replying to your master player ${senderName}. You answer to the names GPT and Dream.
+      const cleanSender = String(senderName).trim();
+      const effectiveMaster = cleanSender.toLowerCase() === 'harshu' ? 'Phyroosh' : cleanSender;
+
+      const systemPrompt = `You are an intelligent, friendly, completely natural Minecraft companion in-game replying to your master player ${effectiveMaster}. You answer to the names GPT and Dream.
 
 NO FIXED TEMPLATES:
 - Speak naturally, casually, and cheerfully like an active player friend on a Minecraft server.

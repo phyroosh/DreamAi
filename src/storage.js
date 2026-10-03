@@ -27,8 +27,8 @@ const DEFAULT_SETTINGS = {
     sneak: false
   },
   autoReconnect: true,
-  autoReconnectDelaySec: 5,
-  permittedUsers: ['Phyroosh', 'voult995']
+  autoReconnectDelaySec: 15,
+  permittedUsers: ['Phyroosh', 'voult995', 'harshu']
 };
 
 export function getSettings() {

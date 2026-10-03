@@ -431,11 +431,14 @@ export class BotManager extends EventEmitter {
   async handlePotentialAiChat(sender, message) {
     if (this.state !== 'SPAWNED' || !this.bot) return;
 
-    const permitted = this.settings.permittedUsers || ['Phyroosh'];
+    const permitted = this.settings.permittedUsers || ['Phyroosh', 'voult995', 'harshu'];
     const cleanMsg = message.trim().toLowerCase();
     const hasTriggerWord = this.aiChat.triggerWords.some(word => cleanMsg.includes(word));
-    const lowerSender = sender.toLowerCase();
-    const isPermitted = permitted.some(u => String(u).trim().toLowerCase() === lowerSender);
+    const lowerSender = sender.toLowerCase().trim();
+    const isPermitted = permitted.some(u => {
+      const p = String(u).trim().toLowerCase();
+      return p === lowerSender || lowerSender.includes(p) || p.includes(lowerSender);
+    });
 
     if (hasTriggerWord && !isPermitted) {
       this.emit('log', { type: 'system', text: `[AI Ignored] "${sender}" called GPT/Dream, but is not in the Permitted Users list!` });
