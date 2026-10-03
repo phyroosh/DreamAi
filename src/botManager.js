@@ -145,23 +145,45 @@ export class BotManager extends EventEmitter {
     const autoLogin = serverConfig.autoLogin !== undefined ? serverConfig.autoLogin : this.settings.autoLogin;
     const version = serverConfig.version ? serverConfig.version.trim() : false;
 
+    let targetIp = null;
+    const originalDomain = host;
+
     // Check if port is default 25565 and host is a domain (e.g. hyrixsmp3.aternos.me).
-    // Cloud environments (Render, AWS, Docker) often fail to resolve SRV records via internal DNS.
-    // We resolve SRV records explicitly using Google (8.8.8.8) and Cloudflare (1.1.1.1) DNS!
-    if (port === 25565 && net.isIP(host) === 0 && host !== 'localhost') {
+    // Cloud environments (Render, AWS, Docker) often fail to resolve SRV records or have DNS lookup latency.
+    // We resolve SRV records and IPv4 explicitly using Google (8.8.8.8) and Cloudflare (1.1.1.1) DNS!
+    if (net.isIP(host) === 0 && host !== 'localhost') {
       try {
         const resolver = new dns.promises.Resolver();
         resolver.setServers(['8.8.8.8', '1.1.1.1']);
-        const srvRecords = await resolver.resolveSrv(`_minecraft._tcp.${host}`);
-        if (srvRecords && srvRecords.length > 0) {
-          port = srvRecords[0].port;
-          if (srvRecords[0].name) {
-            host = srvRecords[0].name.toLowerCase();
+
+        // 1. Resolve SRV for dynamic port
+        if (port === 25565) {
+          try {
+            const srvRecords = await resolver.resolveSrv(`_minecraft._tcp.${host}`);
+            if (srvRecords && srvRecords.length > 0) {
+              port = srvRecords[0].port;
+              if (srvRecords[0].name) {
+                host = srvRecords[0].name.toLowerCase();
+              }
+              this.emit('log', { type: 'system', text: `Resolved dynamic port via Public DNS: ${port}` });
+            }
+          } catch (e) {
+            // no SRV record
           }
-          this.emit('log', { type: 'system', text: `Resolved dynamic port via Public DNS: ${port}` });
+        }
+
+        // 2. Resolve IPv4 directly so the socket never gets stuck on Render's container DNS
+        try {
+          const ips = await resolver.resolve4(host);
+          if (ips && ips.length > 0) {
+            targetIp = ips[0];
+            this.emit('log', { type: 'system', text: `Resolved direct server IP: ${targetIp}` });
+          }
+        } catch (e) {
+          // fallback
         }
       } catch (err) {
-        // SRV resolution not found or failed, continue with default
+        // DNS lookup failed
       }
     }
 
@@ -180,11 +202,12 @@ export class BotManager extends EventEmitter {
 
     this.state = 'CONNECTING';
     this.emit('status', this.getStatus());
-    this.emit('log', { type: 'system', text: `Connecting to ${host}:${port} as ${username} (offline/cracked mode)...` });
+    this.emit('log', { type: 'system', text: `Connecting to ${targetIp || host}:${port} as ${username} (offline/cracked mode)...` });
 
     const botOptions = {
-      host,
+      host: targetIp || host,
       port,
+      fakeHost: originalDomain,
       username,
       auth: 'offline',
       skipValidation: true,
