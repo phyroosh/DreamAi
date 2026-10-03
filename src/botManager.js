@@ -187,7 +187,7 @@ export class BotManager extends EventEmitter {
       username,
       auth: 'offline',
       skipValidation: true,
-      checkTimeoutInterval: 45000
+      checkTimeoutInterval: 120000
     };
 
     if (version && version !== 'auto') {
@@ -233,10 +233,6 @@ export class BotManager extends EventEmitter {
     };
 
     if (bot._client) {
-      bot._client.on('error', (err) => {
-        this.handleBotError(err);
-      });
-
       // Low-level packet interception to fix Paper/offline mode sender usernames
       bot._client.on('packet', (data, meta) => {
         let sender = null;
@@ -345,7 +341,10 @@ export class BotManager extends EventEmitter {
       this.emit('log', { type: 'system', text: 'Bot spawned into the Minecraft world!' });
 
       if (this.aiChat.apiKey) {
-        this.emit('log', { type: 'system', text: '🤖 Chat-Aware AI active: Ready for natural conversation and orders from Phyroosh (GPT/Dream)!' });
+        const users = (this.settings.permittedUsers && this.settings.permittedUsers.length)
+          ? this.settings.permittedUsers.join(', ')
+          : 'Phyroosh';
+        this.emit('log', { type: 'system', text: `🤖 Chat-Aware AI active: Ready for natural conversation and orders from [${users}] (GPT/Dream)!` });
       }
 
       if (autoLogin && loginPassword && !autoLogged) {
@@ -395,8 +394,18 @@ export class BotManager extends EventEmitter {
   async handlePotentialAiChat(sender, message) {
     if (this.state !== 'SPAWNED' || !this.bot) return;
 
-    // Strict validation: Must be from permitted users AND mention GPT or Dream
-    if (!this.aiChat.shouldRespond(sender, message, this.settings.permittedUsers)) return;
+    const permitted = this.settings.permittedUsers || ['Phyroosh'];
+    const cleanMsg = message.trim().toLowerCase();
+    const hasTriggerWord = this.aiChat.triggerWords.some(word => cleanMsg.includes(word));
+    const lowerSender = sender.toLowerCase();
+    const isPermitted = permitted.some(u => String(u).trim().toLowerCase() === lowerSender);
+
+    if (hasTriggerWord && !isPermitted) {
+      this.emit('log', { type: 'system', text: `[AI Ignored] "${sender}" called GPT/Dream, but is not in the Permitted Users list!` });
+      return;
+    }
+
+    if (!isPermitted || !hasTriggerWord) return;
 
     this.emit('log', { type: 'system', text: `[AI Triggered] Message from ${sender}: "${message}"` });
 

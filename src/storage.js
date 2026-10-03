@@ -15,7 +15,7 @@ if (!fs.existsSync(DATA_DIR)) {
 
 // Initial settings default
 const DEFAULT_SETTINGS = {
-  defaultUsername: 'AFK_Bot',
+  defaultUsername: 'Dream',
   defaultPassword: '209801',
   autoLogin: true,
   antiAfkEnabled: true,
@@ -28,7 +28,7 @@ const DEFAULT_SETTINGS = {
   },
   autoReconnect: true,
   autoReconnectDelaySec: 5,
-  permittedUsers: ['Phyroosh']
+  permittedUsers: ['Phyroosh', 'voult995']
 };
 
 export function getSettings() {
