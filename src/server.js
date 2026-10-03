@@ -21,7 +21,7 @@ const io = new SocketIOServer(server, {
   cors: { origin: '*' }
 });
 
-const PORT = process.env.PORT || process.env.SERVER_PORT || process.env.DASHBOARD_PORT || 3000;
+const PORT = parseInt(process.env.SERVER_PORT || process.env.PORT || process.env.DASHBOARD_PORT || '3000', 10);
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '..', 'public')));
@@ -218,10 +218,10 @@ io.on('connection', (socket) => {
   socket.on('settings:update', (data) => botManager.updateSettings(data));
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`===============================================`);
   console.log(` Minecraft AFK Bot Dashboard running!`);
-  console.log(` Web UI: http://localhost:${PORT}`);
+  console.log(` Web UI: http://0.0.0.0:${PORT}`);
   console.log(`===============================================`);
 
   // Auto-connect on startup for cloud hosting environments
