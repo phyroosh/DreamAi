@@ -319,11 +319,18 @@ export class BotManager extends EventEmitter {
       bot._client.on('packet', (data, meta) => {
         let sender = null;
         let message = null;
+        let isWhisper = false;
 
         try {
           if (meta.name === 'profileless_chat') {
             sender = extractText(data.name);
             message = extractText(data.message) || data.message;
+            if (data.type) {
+              const typeStr = JSON.stringify(data.type).toLowerCase();
+              if (typeStr.includes('msg_command') || typeStr.includes('whisper')) {
+                isWhisper = true;
+              }
+            }
           } else if (meta.name === 'player_chat') {
             sender = extractText(data.networkName || data.senderName);
             if (!sender && data.senderUuid) {
@@ -331,6 +338,12 @@ export class BotManager extends EventEmitter {
               if (p) sender = p.username;
             }
             message = data.plainMessage || extractText(data.unsignedChatContent || data.formattedMessage);
+            if (data.type) {
+              const typeStr = JSON.stringify(data.type).toLowerCase();
+              if (typeStr.includes('msg_command') || typeStr.includes('whisper')) {
+                isWhisper = true;
+              }
+            }
           } else if (meta.name === 'system_chat') {
             message = extractText(data.content || data.formattedMessage);
             if (message) {
@@ -411,11 +424,21 @@ export class BotManager extends EventEmitter {
 
           if (this.emitChat(displayTag, cleanMsg)) {
             this.addChatToRecentLog(displayTag, cleanMsg);
-            this.handlePotentialAiChat(resolvedUsername, cleanMsg, resolvedTeam);
+            this.handlePotentialAiChat(resolvedUsername, cleanMsg, resolvedTeam, isWhisper);
           }
         }
       });
     }
+
+    bot.on('whisper', (username, msg) => {
+      const identity = this.resolvePlayerAndTeam(username);
+      const displayTag = `[Whisper] ${identity.username}`;
+      const cleanMsg = String(msg).replace(/§./g, '').trim();
+      if (this.emitChat(displayTag, cleanMsg)) {
+        this.addChatToRecentLog(displayTag, cleanMsg);
+        this.handlePotentialAiChat(identity.username, cleanMsg, identity.team, true);
+      }
+    });
 
     bot.on('connect', () => {
       this.state = 'CONNECTED';
@@ -484,12 +507,28 @@ export class BotManager extends EventEmitter {
     });
   }
 
-  async handlePotentialAiChat(sender, message, team = null) {
+  async handlePotentialAiChat(sender, message, team = null, isWhisper = false) {
     if (this.state !== 'SPAWNED' || !this.bot) return;
 
     const permitted = this.settings.permittedUsers || ['Phyroosh', 'voult995', 'harshu'];
     const cleanMsg = message.trim().toLowerCase();
-    const hasTriggerWord = this.aiChat.triggerWords.some(word => cleanMsg.includes(word));
+    
+    // Check if the message asks to whisper or if it was received as a private message
+    const asksToWhisper = cleanMsg.includes('whisper') || 
+                          cleanMsg.includes('wisper') || 
+                          cleanMsg.includes('/msg') || 
+                          cleanMsg.includes('/tell') ||
+                          cleanMsg.includes('privately') ||
+                          cleanMsg.includes('private');
+
+    const shouldWhisperReply = isWhisper || asksToWhisper;
+
+    // Trigger word check:
+    // In public chat, trigger words (GPT / Dream) prevent talking over other players.
+    // In a direct private whisper to the bot, the user ALREADY addressed the bot directly!
+    const mentionsTriggerWord = this.aiChat.triggerWords.some(word => cleanMsg.includes(word));
+    const hasTriggerWord = mentionsTriggerWord || shouldWhisperReply;
+
     const lowerSender = sender.toLowerCase().trim();
     const lowerTeam = team ? team.toLowerCase().trim() : null;
 
@@ -502,16 +541,17 @@ export class BotManager extends EventEmitter {
 
     if (hasTriggerWord && !isPermitted) {
       const label = team ? `"${sender}" (Team: ${team})` : `"${sender}"`;
-      this.emit('log', { type: 'system', text: `[AI Ignored] ${label} called GPT/Dream, but neither the player nor team is in Permitted Users list!` });
+      this.emit('log', { type: 'system', text: `[AI Ignored] ${label} called GPT/Dream, but is not in Permitted Users list!` });
       return;
     }
 
     if (!isPermitted || !hasTriggerWord) return;
 
+    const channelTag = shouldWhisperReply ? '[Private Whisper]' : '[Public Chat]';
     const logLabel = team && sender.toLowerCase() !== team.toLowerCase()
       ? `${sender} [Team: ${team}]`
       : sender;
-    this.emit('log', { type: 'system', text: `[AI Triggered] Message from ${logLabel}: "${message}"` });
+    this.emit('log', { type: 'system', text: `[AI Triggered] ${channelTag} Message from ${logLabel}: "${message}"` });
 
     const context = this.getBotContext();
     const chatLog = this.recentChatLog.slice(-15).join('\n');
@@ -531,9 +571,15 @@ export class BotManager extends EventEmitter {
 
       // 3. Speak the completely natural, non-templated reply in Minecraft chat
       if (result.text) {
-        this.bot.chat(result.text);
-        this.emitChat(this.bot.username, result.text, true);
-        this.emit('log', { type: 'action', text: `[AI Replied] "${result.text}"` });
+        if (shouldWhisperReply) {
+          this.bot.chat(`/tell ${sender} ${result.text}`);
+          this.emitChat(`-> ${sender} [Whisper]`, result.text, true);
+          this.emit('log', { type: 'action', text: `[AI Whispered to ${sender}] "${result.text}"` });
+        } else {
+          this.bot.chat(result.text);
+          this.emitChat(this.bot.username, result.text, true);
+          this.emit('log', { type: 'action', text: `[AI Replied] "${result.text}"` });
+        }
       }
     }
   }
