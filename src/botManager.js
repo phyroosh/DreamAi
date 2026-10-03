@@ -556,25 +556,27 @@ export class BotManager extends EventEmitter {
     const context = this.getBotContext();
     const chatLog = this.recentChatLog.slice(-15).join('\n');
 
+    const actualPlayer = (sender.toLowerCase() === 'harshu' ? 'Phyroosh' : sender);
+
     // Query LLM with full situational + ambient chat awareness
-    const result = await this.aiChat.getReply(sender, message, context, chatLog);
+    const result = await this.aiChat.getReply(actualPlayer, message, context, chatLog);
     if (result && this.state === 'SPAWNED' && this.bot) {
       // 1. Execute any server slash commands requested by AI
       if (result.commands && result.commands.length > 0) {
-        await this.actionExecutor.executeCommands(result.commands, sender);
+        await this.actionExecutor.executeCommands(result.commands, actualPlayer);
       }
 
       // 2. Execute any physical in-game actions requested by AI
       if (result.actions && result.actions.length > 0) {
-        await this.actionExecutor.executeActions(result.actions, sender);
+        await this.actionExecutor.executeActions(result.actions, actualPlayer);
       }
 
       // 3. Speak the completely natural, non-templated reply in Minecraft chat
       if (result.text) {
         if (shouldWhisperReply) {
-          this.bot.chat(`/tell ${sender} ${result.text}`);
-          this.emitChat(`-> ${sender} [Whisper]`, result.text, true);
-          this.emit('log', { type: 'action', text: `[AI Whispered to ${sender}] "${result.text}"` });
+          this.bot.chat(`/tell ${actualPlayer} ${result.text}`);
+          this.emitChat(`-> ${actualPlayer} [Whisper]`, result.text, true);
+          this.emit('log', { type: 'action', text: `[AI Whispered to ${actualPlayer}] "${result.text}"` });
         } else {
           this.bot.chat(result.text);
           this.emitChat(this.bot.username, result.text, true);

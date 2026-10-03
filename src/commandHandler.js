@@ -14,6 +14,16 @@ export class ActionExecutor {
       const cleanCmd = cmd.trim();
       if (!cleanCmd) continue;
       
+      // Safety guard: if AI attempts to use /tellraw or /title (which require OP), convert to normal chat!
+      if (cleanCmd.toLowerCase().startsWith('/tellraw') || cleanCmd.toLowerCase().startsWith('/title')) {
+        const textMatch = cleanCmd.match(/["']text["']\s*:\s*["']([^"']+)["']/i);
+        const speech = textMatch ? textMatch[1] : cleanCmd.replace(/^\/(?:tellraw|title)\s+@[a-z]\s*/i, '');
+        bot.chat(speech);
+        this.botManager.emit('log', { type: 'action', text: `[AI Replied] "${speech}"` });
+        this.botManager.emitChat(bot.username, speech, true);
+        continue;
+      }
+
       // Ensure leading slash for server commands
       const formatted = cleanCmd.startsWith('/') ? cleanCmd : `/${cleanCmd}`;
       bot.chat(formatted);
