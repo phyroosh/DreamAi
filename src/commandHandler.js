@@ -6,7 +6,7 @@ export class ActionExecutor {
   /**
    * Executes a list of server slash commands (e.g. /tpaccept, /spawn)
    */
-  async executeCommands(commands, sender) {
+  async executeCommands(commands, sender, isWhisper = false) {
     const bot = this.botManager.bot;
     if (!bot || !commands || commands.length === 0) return;
 
@@ -17,10 +17,18 @@ export class ActionExecutor {
       // Safety guard: if AI attempts to use /tellraw or /title (which require OP), convert to normal chat!
       if (cleanCmd.toLowerCase().startsWith('/tellraw') || cleanCmd.toLowerCase().startsWith('/title')) {
         const textMatch = cleanCmd.match(/["']text["']\s*:\s*["']([^"']+)["']/i);
-        const speech = textMatch ? textMatch[1] : cleanCmd.replace(/^\/(?:tellraw|title)\s+@[a-z]\s*/i, '');
-        bot.chat(speech);
-        this.botManager.emit('log', { type: 'action', text: `[AI Replied] "${speech}"` });
-        this.botManager.emitChat(bot.username, speech, true);
+        const speech = textMatch ? textMatch[1] : cleanCmd.replace(/^\/(?:tellraw|title)\s+@[a-z0-9_]+\s*/i, '');
+        if (speech && speech.trim()) {
+          if (isWhisper) {
+            bot.chat(`/tell ${sender} ${speech}`);
+            this.botManager.emitChat(`-> ${sender} [Whisper]`, speech, true);
+            this.botManager.emit('log', { type: 'action', text: `[AI Whispered to ${sender}] "${speech}"` });
+          } else {
+            bot.chat(speech);
+            this.botManager.emit('log', { type: 'action', text: `[AI Replied] "${speech}"` });
+            this.botManager.emitChat(bot.username, speech, true);
+          }
+        }
         continue;
       }
 

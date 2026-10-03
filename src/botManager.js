@@ -15,6 +15,7 @@ export class BotManager extends EventEmitter {
     this.antiAfkTimer = null;
     this.manualDisconnect = false;
     this.reconnectTimer = null;
+    this.connectionWatchdog = null;
     this.spawnTime = null;
 
     // Rolling buffer of recent server chat for ambient awareness (last 20 messages)
@@ -27,6 +28,13 @@ export class BotManager extends EventEmitter {
 
     // Load initial settings
     this.settings = this.storage.getSettings();
+  }
+
+  clearWatchdog() {
+    if (this.connectionWatchdog) {
+      clearTimeout(this.connectionWatchdog);
+      this.connectionWatchdog = null;
+    }
   }
 
   addChatToRecentLog(sender, text) {
@@ -127,12 +135,14 @@ export class BotManager extends EventEmitter {
   }
 
   async connect(serverConfig) {
+    this.clearWatchdog();
     if (this.state === 'CONNECTING' || this.state === 'CONNECTED' || this.state === 'SPAWNED') {
       this.disconnect();
       await new Promise(r => setTimeout(r, 1200));
     }
 
     this.manualDisconnect = false;
+    this.clearWatchdog();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -219,22 +229,34 @@ export class BotManager extends EventEmitter {
     }
 
     try {
-      this.bot = mineflayer.createBot(botOptions);
+      this.clearWatchdog();
+      const currentBot = mineflayer.createBot(botOptions);
+      this.bot = currentBot;
       
       // Connection watchdog: give up to 90 seconds for autoVersion ping + TCP handshake
-      const watchdog = setTimeout(() => {
-        if (this.state === 'CONNECTING' && this.bot) {
+      this.connectionWatchdog = setTimeout(() => {
+        if (this.state === 'CONNECTING' && this.bot === currentBot) {
           this.emit('log', { type: 'warn', text: 'Server handshake timed out after 90s. Retrying connection...' });
           this.handleBotError(new Error('Connection handshake timed out after 90s'));
         }
       }, 90000);
 
-      this.bot.once('connect', () => clearTimeout(watchdog));
-      this.bot.once('error', () => clearTimeout(watchdog));
-      this.bot.once('end', () => clearTimeout(watchdog));
+      const clearIfCurrent = () => {
+        if (this.bot === currentBot) {
+          this.clearWatchdog();
+        }
+      };
+
+      currentBot.once('connect', clearIfCurrent);
+      currentBot.once('login', clearIfCurrent);
+      currentBot.once('spawn', clearIfCurrent);
+      currentBot.once('error', clearIfCurrent);
+      currentBot.once('end', clearIfCurrent);
+      currentBot.once('kicked', clearIfCurrent);
 
       this.setupBotEvents(loginPassword, autoLogin);
     } catch (err) {
+      this.clearWatchdog();
       this.handleBotError(err);
     }
   }
@@ -282,6 +304,38 @@ export class BotManager extends EventEmitter {
     }
 
     return { username: clean, team: null };
+  }
+
+  parseWhisper(text) {
+    if (!text) return null;
+    const clean = String(text).replace(/§./g, '').trim();
+
+    // Pattern 1: [harshu] Phyroosh whispers to you: message OR Phyroosh whispers to you: message
+    // Also whispers:, tells you:, whispered to you:
+    const p1 = clean.match(/^(?:\[([^\]]+)\]\s*)?([a-zA-Z0-9_]{3,16})\s+(?:whispers to you|whispers|tells you|whispered to you):\s*(.*)$/i);
+    if (p1) {
+      return { team: p1[1] || null, sender: p1[2], message: p1[3] };
+    }
+
+    // Pattern 2: [Phyroosh -> you] message OR [harshu] [Phyroosh -> you] message OR [Phyroosh -> me]
+    const p2 = clean.match(/^(?:\[([^\]]+)\]\s*)?\[\s*([a-zA-Z0-9_]{3,16})\s*->\s*(?:you|me)\s*\]\s*(.*)$/i);
+    if (p2) {
+      return { team: p2[1] || null, sender: p2[2], message: p2[3] };
+    }
+
+    // Pattern 3: From Phyroosh: message OR [From Phyroosh] message OR [harshu] From Phyroosh: message
+    const p3 = clean.match(/^(?:\[([^\]]+)\]\s*)?(?:\[\s*From\s+([a-zA-Z0-9_]{3,16})\s*\]|From\s+([a-zA-Z0-9_]{3,16}):)\s*(.*)$/i);
+    if (p3) {
+      return { team: p3[1] || null, sender: p3[2] || p3[3], message: p3[4] };
+    }
+
+    // Pattern 4: Phyroosh -> you: message or Phyroosh » you: message
+    const p4 = clean.match(/^(?:\[([^\]]+)\]\s*)?([a-zA-Z0-9_]{3,16})\s*(?:->|»)\s*(?:you|me):\s*(.*)$/i);
+    if (p4) {
+      return { team: p4[1] || null, sender: p4[2], message: p4[3] };
+    }
+
+    return null;
   }
 
   setupBotEvents(loginPassword, autoLogin) {
@@ -347,9 +401,23 @@ export class BotManager extends EventEmitter {
           } else if (meta.name === 'system_chat') {
             message = extractText(data.content || data.formattedMessage);
             if (message) {
-              const sysLabel = data.isActionBar ? 'ACTIONBAR' : 'SERVER';
               const cleanMsg = message.replace(/§./g, '').trim();
               if (cleanMsg) {
+                // Check if this system_chat is actually a private whisper from a player!
+                const whisperData = this.parseWhisper(cleanMsg);
+                if (whisperData) {
+                  const identity = this.resolvePlayerAndTeam(whisperData.sender);
+                  const resolvedUsername = identity.username;
+                  const resolvedTeam = whisperData.team || identity.team;
+                  const displayTag = `[Whisper] ${resolvedTeam && resolvedUsername.toLowerCase() !== resolvedTeam.toLowerCase() ? `[${resolvedTeam}] ` : ''}${resolvedUsername}`;
+                  if (this.emitChat(displayTag, whisperData.message)) {
+                    this.addChatToRecentLog(displayTag, whisperData.message);
+                    this.handlePotentialAiChat(resolvedUsername, whisperData.message, resolvedTeam, true);
+                  }
+                  return;
+                }
+
+                const sysLabel = data.isActionBar ? 'ACTIONBAR' : 'SERVER';
                 if (this.emitChat(sysLabel, cleanMsg)) {
                   this.addChatToRecentLog(sysLabel, cleanMsg);
                   if (cleanMsg.toLowerCase().includes('has requested to teleport') || cleanMsg.toLowerCase().includes('teleport request')) {
@@ -374,6 +442,19 @@ export class BotManager extends EventEmitter {
             message = extractText(data.message);
             if (message) {
               const cleanMsg = message.replace(/§./g, '').trim();
+              const whisperData = this.parseWhisper(cleanMsg);
+              if (whisperData) {
+                const identity = this.resolvePlayerAndTeam(whisperData.sender);
+                const resolvedUsername = identity.username;
+                const resolvedTeam = whisperData.team || identity.team;
+                const displayTag = `[Whisper] ${resolvedTeam && resolvedUsername.toLowerCase() !== resolvedTeam.toLowerCase() ? `[${resolvedTeam}] ` : ''}${resolvedUsername}`;
+                if (this.emitChat(displayTag, whisperData.message)) {
+                  this.addChatToRecentLog(displayTag, whisperData.message);
+                  this.handlePotentialAiChat(resolvedUsername, whisperData.message, resolvedTeam, true);
+                }
+                return;
+              }
+
               const parsed = this.aiChat.parseSenderAndMessage(cleanMsg);
               if (parsed) {
                 sender = parsed.sender;
@@ -437,6 +518,22 @@ export class BotManager extends EventEmitter {
       if (this.emitChat(displayTag, cleanMsg)) {
         this.addChatToRecentLog(displayTag, cleanMsg);
         this.handlePotentialAiChat(identity.username, cleanMsg, identity.team, true);
+      }
+    });
+
+    bot.on('messagestr', (msg) => {
+      if (!msg) return;
+      const cleanMsg = String(msg).replace(/§./g, '').trim();
+      const whisperData = this.parseWhisper(cleanMsg);
+      if (whisperData) {
+        const identity = this.resolvePlayerAndTeam(whisperData.sender);
+        const resolvedUsername = identity.username;
+        const resolvedTeam = whisperData.team || identity.team;
+        const displayTag = `[Whisper] ${resolvedTeam && resolvedUsername.toLowerCase() !== resolvedTeam.toLowerCase() ? `[${resolvedTeam}] ` : ''}${resolvedUsername}`;
+        if (this.emitChat(displayTag, whisperData.message)) {
+          this.addChatToRecentLog(displayTag, whisperData.message);
+          this.handlePotentialAiChat(resolvedUsername, whisperData.message, resolvedTeam, true);
+        }
       }
     });
 
@@ -563,7 +660,7 @@ export class BotManager extends EventEmitter {
     if (result && this.state === 'SPAWNED' && this.bot) {
       // 1. Execute any server slash commands requested by AI
       if (result.commands && result.commands.length > 0) {
-        await this.actionExecutor.executeCommands(result.commands, actualPlayer);
+        await this.actionExecutor.executeCommands(result.commands, actualPlayer, shouldWhisperReply);
       }
 
       // 2. Execute any physical in-game actions requested by AI
@@ -587,6 +684,7 @@ export class BotManager extends EventEmitter {
   }
 
   handleBotError(err) {
+    this.clearWatchdog();
     const errorMsg = err?.message || String(err);
     this.emit('log', { type: 'error', text: `Bot connection error: ${errorMsg}` });
     this.state = 'ERROR';
@@ -698,6 +796,7 @@ export class BotManager extends EventEmitter {
 
   disconnect() {
     this.manualDisconnect = true;
+    this.clearWatchdog();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -707,6 +806,7 @@ export class BotManager extends EventEmitter {
   }
 
   cleanup(isManual = false) {
+    this.clearWatchdog();
     if (this.antiAfkTimer) {
       clearTimeout(this.antiAfkTimer);
       this.antiAfkTimer = null;
@@ -721,6 +821,7 @@ export class BotManager extends EventEmitter {
         if (this.bot._client) {
           this.bot._client.removeAllListeners('error');
           this.bot._client.removeAllListeners('playerChat');
+          this.bot._client.removeAllListeners('packet');
         }
         this.bot.quit();
       } catch (e) {
