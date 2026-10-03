@@ -19,6 +19,8 @@ const DEFAULT_SETTINGS = {
   defaultUsername: 'Dream',
   defaultPassword: '209801',
   autoLogin: true,
+  autoEat: true,
+  autoEatThreshold: 16,
   antiAfkEnabled: true,
   antiAfkIntervalSec: 8,
   antiAfkActions: {

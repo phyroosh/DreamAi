@@ -14,6 +14,7 @@ export class BotManager extends EventEmitter {
     this.currentServer = null;
     this.antiAfkTimer = null;
     this.isRoaming = false;
+    this.isEating = false;
     this.manualDisconnect = false;
     this.reconnectTimer = null;
     this.connectionWatchdog = null;
@@ -637,6 +638,7 @@ export class BotManager extends EventEmitter {
 
     bot.on('health', () => {
       this.emit('status', this.getStatus());
+      this.checkAutoEat();
     });
 
     bot.on('move', () => {
@@ -773,7 +775,7 @@ export class BotManager extends EventEmitter {
   }
 
   async roamChamber(durationMs = 2200) {
-    if (!this.bot || this.state !== 'SPAWNED' || !this.bot.entity || this.isRoaming) return;
+    if (!this.bot || this.state !== 'SPAWNED' || !this.bot.entity || this.isRoaming || this.isEating) return;
     this.isRoaming = true;
 
     try {
@@ -848,8 +850,107 @@ export class BotManager extends EventEmitter {
     }
   }
 
+  findBestFood() {
+    if (!this.bot || !this.bot.inventory) return null;
+    const items = this.bot.inventory.items();
+    if (!items || items.length === 0) return null;
+
+    const HARMFUL_FOODS = new Set([
+      'rotten_flesh',
+      'pufferfish',
+      'poisonous_potato',
+      'spider_eye',
+      'chorus_fruit',
+      'suspicious_stew'
+    ]);
+
+    const COMMON_FOODS = new Set([
+      'cooked_beef', 'cooked_porkchop', 'golden_carrot', 'golden_apple', 'enchanted_golden_apple',
+      'cooked_mutton', 'cooked_salmon', 'baked_potato', 'bread', 'cooked_chicken',
+      'cooked_cod', 'cooked_rabbit', 'carrot', 'apple', 'melon_slice', 'sweet_berries',
+      'glow_berries', 'pumpkin_pie', 'cookie', 'beef', 'porkchop', 'mutton', 'chicken',
+      'rabbit', 'salmon', 'cod', 'potato', 'beetroot', 'dried_kelp'
+    ]);
+
+    const edible = items.filter(item => {
+      if (!item || !item.name) return false;
+      if (HARMFUL_FOODS.has(item.name)) return false;
+      if (this.bot.registry?.foodsByName && this.bot.registry.foodsByName[item.name]) return true;
+      return COMMON_FOODS.has(item.name);
+    });
+
+    if (edible.length === 0) return null;
+
+    // Prefer foods with higher nutrition / foodPoints
+    edible.sort((a, b) => {
+      const aPoints = this.bot.registry?.foodsByName?.[a.name]?.foodPoints ?? 4;
+      const bPoints = this.bot.registry?.foodsByName?.[b.name]?.foodPoints ?? 4;
+      return bPoints - aPoints;
+    });
+
+    return edible[0];
+  }
+
+  async eatFood(targetItem = null) {
+    if (!this.bot || this.state !== 'SPAWNED' || !this.bot.entity || this.isEating) return false;
+    if (this.bot.food >= 20) return false;
+
+    const foodItem = targetItem || this.findBestFood();
+    if (!foodItem) return false;
+
+    this.isEating = true;
+    const prevSlot = this.bot.quickBarSlot;
+
+    try {
+      this.emit('log', {
+        type: 'action',
+        text: `Auto-Eat: Low hunger (${Math.round(this.bot.food)}/20). Eating ${foodItem.name}...`
+      });
+
+      // Equip food in main hand
+      await this.bot.equip(foodItem, 'hand');
+
+      // Consume food item
+      await this.bot.consume();
+
+      this.emit('log', {
+        type: 'action',
+        text: `Auto-Eat: Finished eating ${foodItem.name}! Hunger restored to ${Math.round(this.bot.food)}/20.`
+      });
+      this.emit('status', this.getStatus());
+      return true;
+    } catch (err) {
+      if (!err.message?.includes('Food is full')) {
+        this.emit('log', { type: 'warn', text: `Auto-Eat: Could not eat ${foodItem.name} (${err.message})` });
+      }
+      return false;
+    } finally {
+      if (prevSlot !== undefined && this.bot) {
+        try {
+          this.bot.setQuickBarSlot(prevSlot);
+        } catch (e) {}
+      }
+      this.isEating = false;
+    }
+  }
+
+  async checkAutoEat() {
+    if (!this.bot || this.state !== 'SPAWNED' || !this.bot.entity || this.isEating) return;
+    if (this.settings.autoEat === false) return;
+
+    const threshold = this.settings.autoEatThreshold || 16;
+    const needsHealing = (this.bot.health < 20 && this.bot.food <= 18);
+
+    if (this.bot.food <= threshold || needsHealing) {
+      await this.eatFood();
+    }
+  }
+
   async performAntiAfkAction() {
     if (!this.bot || this.state !== 'SPAWNED' || !this.bot.entity) return;
+
+    // Check Auto-Eat before performing roaming or other anti-afk actions
+    await this.checkAutoEat();
 
     const actions = this.settings.antiAfkActions || {};
 
@@ -939,6 +1040,16 @@ export class BotManager extends EventEmitter {
         this.emit('log', { type: 'action', text: 'Manual: Walking around chamber' });
         await this.roamChamber(2500);
         break;
+      case 'eat':
+        const food = this.findBestFood();
+        if (!food) {
+          this.emit('log', { type: 'warn', text: 'Manual: No edible food found in inventory!' });
+        } else if (this.bot.food >= 20) {
+          this.emit('log', { type: 'system', text: 'Manual: Hunger bar is already full (20/20)!' });
+        } else {
+          await this.eatFood(food);
+        }
+        break;
       case 'swing':
         this.bot.swingArm('right');
         this.emit('log', { type: 'action', text: 'Manual: Swung right arm' });
@@ -984,6 +1095,7 @@ export class BotManager extends EventEmitter {
 
   cleanup(isManual = false) {
     this.isRoaming = false;
+    this.isEating = false;
     this.clearWatchdog();
     if (this.antiAfkTimer) {
       clearTimeout(this.antiAfkTimer);

@@ -62,6 +62,13 @@ export class ActionExecutor {
           await this.botManager.roamChamber(2500);
           break;
 
+        case 'eat':
+        case 'eat_food':
+        case 'consume':
+          this.botManager.emit('log', { type: 'action', text: `[Action] Eating food on order from ${sender}` });
+          await this.botManager.eatFood();
+          break;
+
         case 'jump':
           bot.setControlState('jump', true);
           setTimeout(() => {

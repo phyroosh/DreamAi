@@ -34,6 +34,7 @@ const btnCloseSettings = document.getElementById('btn-close-settings');
 const chkAntiAfk = document.getElementById('chk-antiafk');
 const afkOpts = document.getElementById('antiafk-options');
 const chkWalk = document.getElementById('chk-walk');
+const chkAutoEat = document.getElementById('chk-autoeat');
 const chkSwing = document.getElementById('chk-swing');
 const chkLook = document.getElementById('chk-look');
 const chkJump = document.getElementById('chk-jump');
@@ -137,6 +138,7 @@ const syncSettings = () => {
   socket.emit('settings:update', {
     antiAfkEnabled: chkAntiAfk.checked,
     antiAfkIntervalSec: parseInt(inpInterval.value),
+    autoEat: chkAutoEat ? chkAutoEat.checked : true,
     antiAfkActions: {
       walkAround: chkWalk ? chkWalk.checked : true,
       swingArm: chkSwing.checked,
@@ -150,6 +152,7 @@ const syncSettings = () => {
 
 chkAntiAfk.onchange = syncSettings;
 if (chkWalk) chkWalk.onchange = syncSettings;
+if (chkAutoEat) chkAutoEat.onchange = syncSettings;
 chkSwing.onchange = syncSettings;
 chkLook.onchange = syncSettings;
 if (chkStep) chkStep.onchange = syncSettings;
@@ -296,6 +299,7 @@ socket.on('servers:updated', (srvs) => {
 socket.on('bot:settings', (st) => {
   if (!st) return;
   chkAntiAfk.checked = !!st.antiAfkEnabled;
+  if (chkAutoEat) chkAutoEat.checked = st.autoEat !== false;
   inpInterval.value = st.antiAfkIntervalSec || 10;
   valInterval.textContent = inpInterval.value;
   if (st.antiAfkActions) {

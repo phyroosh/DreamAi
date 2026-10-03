@@ -146,9 +146,18 @@
         </div>
 
         <div class="setting-group" style="margin-top:8px; border-top:1px solid var(--border); padding-top:12px;">
+          <label class="cb-label toggle-label">
+            <input type="checkbox" id="chk-autoeat" checked>
+            <strong>Auto-Eat Food (When Hunger Low)</strong>
+          </label>
+          <p class="help-text">Consumes food from inventory when hunger is ≤ 16.</p>
+        </div>
+
+        <div class="setting-group" style="margin-top:8px; border-top:1px solid var(--border); padding-top:12px;">
           <h4>Manual Actions (Test)</h4>
           <div class="row" style="margin-top:6px;">
             <button class="btn btn-secondary btn-sm" data-action="walk">Walk</button>
+            <button class="btn btn-secondary btn-sm" data-action="eat">Eat</button>
             <button class="btn btn-secondary btn-sm" data-action="swing">Swing</button>
             <button class="btn btn-secondary btn-sm" data-action="look">Look</button>
             <button class="btn btn-secondary btn-sm" data-action="jump">Jump</button>
