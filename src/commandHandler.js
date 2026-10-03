@@ -55,6 +55,13 @@ export class ActionExecutor {
 
     for (const action of actions) {
       switch (action.toLowerCase()) {
+        case 'walk':
+        case 'roam':
+        case 'move':
+          this.botManager.emit('log', { type: 'action', text: `[Action] Roaming chamber on order from ${sender}` });
+          await this.botManager.roamChamber(2500);
+          break;
+
         case 'jump':
           bot.setControlState('jump', true);
           setTimeout(() => {

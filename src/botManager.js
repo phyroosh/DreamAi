@@ -13,6 +13,7 @@ export class BotManager extends EventEmitter {
     this.state = 'DISCONNECTED'; // DISCONNECTED, CONNECTING, CONNECTED, SPAWNED, ERROR
     this.currentServer = null;
     this.antiAfkTimer = null;
+    this.isRoaming = false;
     this.manualDisconnect = false;
     this.reconnectTimer = null;
     this.connectionWatchdog = null;
@@ -771,6 +772,82 @@ export class BotManager extends EventEmitter {
     }, nextInterval);
   }
 
+  async roamChamber(durationMs = 2200) {
+    if (!this.bot || this.state !== 'SPAWNED' || !this.bot.entity || this.isRoaming) return;
+    this.isRoaming = true;
+
+    try {
+      // Pick a random heading or turn relative to current yaw
+      const turnDelta = (Math.random() * Math.PI * 1.2) - (Math.PI * 0.6); // -108 to +108 deg
+      const newYaw = (this.bot.entity.yaw || 0) + turnDelta;
+      const newPitch = (Math.random() * 0.3) - 0.15;
+      await this.bot.look(newYaw, newPitch, true);
+
+      // Start moving forward
+      this.bot.setControlState('forward', true);
+
+      // Occasional sprint (30% chance)
+      if (Math.random() > 0.7) {
+        this.bot.setControlState('sprint', true);
+      }
+
+      // Small jump if jump is enabled (40% chance)
+      if (this.settings.antiAfkActions?.jump !== false && Math.random() > 0.6) {
+        this.bot.setControlState('jump', true);
+        setTimeout(() => {
+          if (this.bot) this.bot.setControlState('jump', false);
+        }, 280);
+      }
+
+      const startTime = Date.now();
+      let lastPos = this.bot.entity.position ? this.bot.entity.position.clone() : null;
+      let wallHitCount = 0;
+
+      // Monitor movement every 250ms during roam
+      while (Date.now() - startTime < durationMs) {
+        await new Promise(r => setTimeout(r, 250));
+        if (!this.bot || this.state !== 'SPAWNED' || !this.bot.entity) break;
+
+        const currentPos = this.bot.entity.position;
+        if (!currentPos || !lastPos) break;
+
+        const distMoved = currentPos.distanceTo(lastPos);
+        lastPos = currentPos.clone();
+
+        // If bot barely moved (< 0.08 blocks in 250ms), it's pressing against a wall or obstacle!
+        if (distMoved < 0.08) {
+          wallHitCount++;
+          if (wallHitCount >= 2) {
+            // Hit a wall! Turn 120-180 degrees away from the wall
+            this.bot.setControlState('forward', false);
+            this.bot.setControlState('sprint', false);
+            const bounceYaw = (this.bot.entity.yaw || 0) + Math.PI * (0.7 + Math.random() * 0.6);
+            await this.bot.look(bounceYaw, 0, true);
+            // Resume walking forward into open chamber
+            this.bot.setControlState('forward', true);
+            wallHitCount = 0;
+          }
+        } else {
+          wallHitCount = 0;
+        }
+      }
+    } catch (err) {
+      // ignore
+    } finally {
+      if (this.bot) {
+        try {
+          this.bot.setControlState('forward', false);
+          this.bot.setControlState('sprint', false);
+          this.bot.setControlState('jump', false);
+          this.bot.setControlState('back', false);
+          this.bot.setControlState('left', false);
+          this.bot.setControlState('right', false);
+        } catch (e) {}
+      }
+      this.isRoaming = false;
+    }
+  }
+
   async performAntiAfkAction() {
     if (!this.bot || this.state !== 'SPAWNED' || !this.bot.entity) return;
 
@@ -797,9 +874,26 @@ export class BotManager extends EventEmitter {
         this.emit('log', { type: 'action', text: `Anti-AFK: Shifted view angle` });
       }
 
-      // Safe Positional Micro-Step (Critical: Minecraft servers only reset idle timer on position changes!)
-      if (actions.microStep !== false) {
-        // Hold sneak to guarantee the bot can NEVER walk off a cliff, ledge, or into hazards
+      // Quickbar Slot Nudge (sends held_item_change packet to reset idle timeouts)
+      try {
+        if (this.bot.quickBarSlot !== undefined) {
+          const currentSlot = this.bot.quickBarSlot;
+          const nextSlot = (currentSlot + 1) % 9;
+          this.bot.setQuickBarSlot(nextSlot);
+          setTimeout(() => {
+            if (this.bot) this.bot.setQuickBarSlot(currentSlot);
+          }, 120);
+        }
+      } catch (e) {
+        // ignore
+      }
+
+      // Chamber Roam (Walk Around Chamber)
+      if (actions.walkAround !== false) {
+        this.emit('log', { type: 'action', text: `Anti-AFK: Roaming chamber (walking)` });
+        await this.roamChamber(2200);
+      } else if (actions.microStep) {
+        // Fallback micro-step if walkAround is explicitly disabled
         this.bot.setControlState('sneak', true);
         const dir = Math.random() > 0.5 ? 'forward' : 'back';
         const oppDir = dir === 'forward' ? 'back' : 'forward';
@@ -817,28 +911,14 @@ export class BotManager extends EventEmitter {
         }, 180);
       }
 
-      // Quickbar Slot Nudge (sends held_item_change packet to reset idle timeouts)
-      try {
-        if (this.bot.quickBarSlot !== undefined) {
-          const currentSlot = this.bot.quickBarSlot;
-          const nextSlot = (currentSlot + 1) % 9;
-          this.bot.setQuickBarSlot(nextSlot);
-          setTimeout(() => {
-            if (this.bot) this.bot.setQuickBarSlot(currentSlot);
-          }, 120);
-        }
-      } catch (e) {
-        // ignore
-      }
-
-      if (actions.sneak && actions.microStep === false) {
+      if (actions.sneak && !actions.walkAround && !actions.microStep) {
         this.bot.setControlState('sneak', true);
         setTimeout(() => {
           if (this.bot) this.bot.setControlState('sneak', false);
         }, 400);
       }
 
-      if (actions.jump) {
+      if (actions.jump && actions.walkAround === false) {
         this.bot.setControlState('jump', true);
         setTimeout(() => {
           if (this.bot) this.bot.setControlState('jump', false);
@@ -849,12 +929,16 @@ export class BotManager extends EventEmitter {
     }
   }
 
-  manualAction(actionType) {
+  async manualAction(actionType) {
     if (!this.bot || this.state !== 'SPAWNED') {
       throw new Error('Bot is not spawned in a world');
     }
 
     switch (actionType) {
+      case 'walk':
+        this.emit('log', { type: 'action', text: 'Manual: Walking around chamber' });
+        await this.roamChamber(2500);
+        break;
       case 'swing':
         this.bot.swingArm('right');
         this.emit('log', { type: 'action', text: 'Manual: Swung right arm' });
@@ -899,6 +983,7 @@ export class BotManager extends EventEmitter {
   }
 
   cleanup(isManual = false) {
+    this.isRoaming = false;
     this.clearWatchdog();
     if (this.antiAfkTimer) {
       clearTimeout(this.antiAfkTimer);
@@ -909,6 +994,11 @@ export class BotManager extends EventEmitter {
     }
     this.spawnTime = null;
     if (this.bot) {
+      try {
+        this.bot.clearControlStates();
+      } catch (e) {
+        // ignore
+      }
       try {
         this.bot.removeAllListeners();
         if (this.bot._client) {

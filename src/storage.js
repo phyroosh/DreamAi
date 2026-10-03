@@ -20,12 +20,13 @@ const DEFAULT_SETTINGS = {
   defaultPassword: '209801',
   autoLogin: true,
   antiAfkEnabled: true,
-  antiAfkIntervalSec: 10,
+  antiAfkIntervalSec: 8,
   antiAfkActions: {
+    walkAround: true,
     swingArm: true,
     lookAround: true,
-    microStep: true,
-    jump: false,
+    jump: true,
+    microStep: false,
     sneak: false
   },
   autoReconnect: true,

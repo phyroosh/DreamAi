@@ -135,6 +135,7 @@ Attach these tags to your message whenever ${effectiveMaster} requests an in-gam
   * When ${effectiveMaster} asks you to go to spawn: [EXEC:/spawn]
   * When ${effectiveMaster} asks you to go home: [EXEC:/home]
   * Any other player command: [EXEC:/command]
+- [ACTION:walk] : Walk and roam around the chamber / room.
 - [ACTION:jump] : Jump in the air.
 - [ACTION:look_at_player] : Turn your head directly toward ${effectiveMaster}.
 - [ACTION:swing_arm] : Punch or swing your hand.
