@@ -221,13 +221,13 @@ export class BotManager extends EventEmitter {
     try {
       this.bot = mineflayer.createBot(botOptions);
       
-      // Connection watchdog: if handshake takes longer than 25s, notify and recover
+      // Connection watchdog: give up to 90 seconds for autoVersion ping + TCP handshake
       const watchdog = setTimeout(() => {
         if (this.state === 'CONNECTING' && this.bot) {
-          this.emit('log', { type: 'warn', text: 'Server handshake is taking long. Retrying connection...' });
-          this.handleBotError(new Error('Connection handshake timed out after 25s'));
+          this.emit('log', { type: 'warn', text: 'Server handshake timed out after 90s. Retrying connection...' });
+          this.handleBotError(new Error('Connection handshake timed out after 90s'));
         }
-      }, 25000);
+      }, 90000);
 
       this.bot.once('connect', () => clearTimeout(watchdog));
       this.bot.once('error', () => clearTimeout(watchdog));
