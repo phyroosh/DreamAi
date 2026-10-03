@@ -791,13 +791,47 @@ export class BotManager extends EventEmitter {
         const deltaPitch = (Math.random() * 0.4 - 0.2);
 
         const newYaw = currentYaw + deltaYaw;
-        const newPitch = Math.max(-1.2, Math.min(1.2, currentPitch + deltaPitch));
+        const newPitch = Math.max(-1.0, Math.min(1.0, currentPitch + deltaPitch));
 
         await this.bot.look(newYaw, newPitch, true);
         this.emit('log', { type: 'action', text: `Anti-AFK: Shifted view angle` });
       }
 
-      if (actions.sneak) {
+      // Safe Positional Micro-Step (Critical: Minecraft servers only reset idle timer on position changes!)
+      if (actions.microStep !== false) {
+        // Hold sneak to guarantee the bot can NEVER walk off a cliff, ledge, or into hazards
+        this.bot.setControlState('sneak', true);
+        const dir = Math.random() > 0.5 ? 'forward' : 'back';
+        const oppDir = dir === 'forward' ? 'back' : 'forward';
+
+        this.bot.setControlState(dir, true);
+        setTimeout(() => {
+          if (!this.bot) return;
+          this.bot.setControlState(dir, false);
+          this.bot.setControlState(oppDir, true);
+          setTimeout(() => {
+            if (!this.bot) return;
+            this.bot.setControlState(oppDir, false);
+            this.bot.setControlState('sneak', false);
+          }, 180);
+        }, 180);
+      }
+
+      // Quickbar Slot Nudge (sends held_item_change packet to reset idle timeouts)
+      try {
+        if (this.bot.quickBarSlot !== undefined) {
+          const currentSlot = this.bot.quickBarSlot;
+          const nextSlot = (currentSlot + 1) % 9;
+          this.bot.setQuickBarSlot(nextSlot);
+          setTimeout(() => {
+            if (this.bot) this.bot.setQuickBarSlot(currentSlot);
+          }, 120);
+        }
+      } catch (e) {
+        // ignore
+      }
+
+      if (actions.sneak && actions.microStep === false) {
         this.bot.setControlState('sneak', true);
         setTimeout(() => {
           if (this.bot) this.bot.setControlState('sneak', false);

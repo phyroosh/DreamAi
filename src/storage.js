@@ -24,6 +24,7 @@ const DEFAULT_SETTINGS = {
   antiAfkActions: {
     swingArm: true,
     lookAround: true,
+    microStep: true,
     jump: false,
     sneak: false
   },

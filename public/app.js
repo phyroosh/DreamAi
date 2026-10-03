@@ -37,6 +37,7 @@ const chkSwing = document.getElementById('chk-swing');
 const chkLook = document.getElementById('chk-look');
 const chkJump = document.getElementById('chk-jump');
 const chkSneak = document.getElementById('chk-sneak');
+const chkStep = document.getElementById('chk-step');
 const inpInterval = document.getElementById('inp-interval');
 const valInterval = document.getElementById('val-interval');
 const inpPermittedUsers = document.getElementById('inp-permitted-users');
@@ -138,6 +139,7 @@ const syncSettings = () => {
     antiAfkActions: {
       swingArm: chkSwing.checked,
       lookAround: chkLook.checked,
+      microStep: chkStep ? chkStep.checked : true,
       jump: chkJump.checked,
       sneak: chkSneak.checked
     }
@@ -147,6 +149,7 @@ const syncSettings = () => {
 chkAntiAfk.onchange = syncSettings;
 chkSwing.onchange = syncSettings;
 chkLook.onchange = syncSettings;
+if (chkStep) chkStep.onchange = syncSettings;
 chkJump.onchange = syncSettings;
 chkSneak.onchange = syncSettings;
 inpInterval.oninput = () => { valInterval.textContent = inpInterval.value; };
@@ -295,6 +298,7 @@ socket.on('bot:settings', (st) => {
   if (st.antiAfkActions) {
     chkSwing.checked = st.antiAfkActions.swingArm !== false;
     chkLook.checked = st.antiAfkActions.lookAround !== false;
+    if (chkStep) chkStep.checked = st.antiAfkActions.microStep !== false;
     chkJump.checked = !!st.antiAfkActions.jump;
     chkSneak.checked = !!st.antiAfkActions.sneak;
   }
