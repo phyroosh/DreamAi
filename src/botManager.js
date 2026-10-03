@@ -28,6 +28,18 @@ export class BotManager extends EventEmitter {
 
     // Load initial settings
     this.settings = this.storage.getSettings();
+
+    // Rolling buffer of recent system logs (last 100)
+    this.systemLogs = [];
+    this.on('log', (entry) => {
+      const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      this.systemLogs.push({ time, ...entry });
+      if (this.systemLogs.length > 100) this.systemLogs.shift();
+    });
+  }
+
+  getLogs() {
+    return this.systemLogs;
   }
 
   clearWatchdog() {
@@ -253,6 +265,18 @@ export class BotManager extends EventEmitter {
       currentBot.once('error', clearIfCurrent);
       currentBot.once('end', clearIfCurrent);
       currentBot.once('kicked', clearIfCurrent);
+
+      if (currentBot._client) {
+        currentBot._client.once('connect', () => {
+          this.emit('log', { type: 'system', text: 'TCP socket connection established!' });
+        });
+        currentBot._client.on('error', (err) => {
+          this.emit('log', { type: 'error', text: `Client network error: ${err.message}` });
+        });
+        currentBot._client.on('state', (newState) => {
+          this.emit('log', { type: 'system', text: `Protocol state: ${newState}` });
+        });
+      }
 
       this.setupBotEvents(loginPassword, autoLogin);
     } catch (err) {

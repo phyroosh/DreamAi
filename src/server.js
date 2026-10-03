@@ -4,6 +4,9 @@ import { Server as SocketIOServer } from 'socket.io';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
+import net from 'net';
+import dns from 'dns';
+import mc from 'minecraft-protocol';
 import * as storage from './storage.js';
 import { BotManager } from './botManager.js';
 
@@ -49,6 +52,65 @@ botManager.on('settings', (settings) => io.emit('bot:settings', settings));
 // API Routes
 app.get('/api/status', (req, res) => {
   res.json(botManager.getStatus());
+});
+
+app.get('/api/logs', (req, res) => {
+  res.json(botManager.getLogs());
+});
+
+app.get('/api/debug', async (req, res) => {
+  const results = { timestamp: new Date().toISOString() };
+  const host = req.query.host || 'hyrixsmp3.aternos.me';
+  const port = Number(req.query.port) || 26743;
+  const ip = req.query.ip || '185.107.192.56';
+
+  // 1. Test DNS
+  try {
+    const resolver = new dns.promises.Resolver();
+    resolver.setServers(['8.8.8.8', '1.1.1.1']);
+    results.dns_srv = await resolver.resolveSrv(`_minecraft._tcp.${host}`).catch(e => e.message);
+    results.dns_a = await resolver.resolve4(host).catch(e => e.message);
+  } catch (e) {
+    results.dns_error = e.message;
+  }
+
+  // 2. Test TCP to IP:port
+  try {
+    const start = Date.now();
+    await new Promise((resolve, reject) => {
+      const socket = net.createConnection({ host: ip, port, timeout: 5000 }, () => {
+        results.tcp_ip = { status: 'connected', latencyMs: Date.now() - start };
+        socket.end();
+        resolve();
+      });
+      socket.on('error', (err) => {
+        results.tcp_ip = { status: 'error', error: err.message };
+        resolve();
+      });
+      socket.on('timeout', () => {
+        results.tcp_ip = { status: 'timeout' };
+        socket.destroy();
+        resolve();
+      });
+    });
+  } catch (e) {
+    results.tcp_ip_catch = e.message;
+  }
+
+  // 3. Test MC ping
+  try {
+    const pingRes = await new Promise((resolve, reject) => {
+      mc.ping({ host: ip, port, fakeHost: host, closeTimeout: 6000 }, (err, data) => {
+        if (err) reject(err);
+        else resolve(data);
+      });
+    });
+    results.mc_ping = { status: 'success', version: pingRes.version, latency: pingRes.latency };
+  } catch (e) {
+    results.mc_ping = { status: 'error', error: e.message };
+  }
+
+  res.json(results);
 });
 
 app.get('/api/servers', (req, res) => {
