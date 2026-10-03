@@ -21,7 +21,7 @@ const io = new SocketIOServer(server, {
   cors: { origin: '*' }
 });
 
-const PORT = process.env.PORT || process.env.DASHBOARD_PORT || 3000;
+const PORT = process.env.PORT || process.env.SERVER_PORT || process.env.DASHBOARD_PORT || 3000;
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '..', 'public')));
@@ -223,4 +223,24 @@ server.listen(PORT, () => {
   console.log(` Minecraft AFK Bot Dashboard running!`);
   console.log(` Web UI: http://localhost:${PORT}`);
   console.log(`===============================================`);
+
+  // Auto-connect on startup for cloud hosting environments
+  const shouldAutoConnect = process.env.AUTO_CONNECT === 'true' || 
+    (process.env.AUTO_CONNECT !== 'false' && (process.env.MC_HOST || storage.getSavedServers().length > 0));
+
+  if (shouldAutoConnect) {
+    const saved = storage.getSavedServers()[0] || {};
+    const target = {
+      host: process.env.MC_HOST || saved.host || 'hyrixsmp3.aternos.me',
+      port: parseInt(process.env.MC_PORT || saved.port || '26743', 10),
+      username: process.env.MC_USERNAME || saved.username || 'Dream',
+      loginPassword: process.env.MC_PASSWORD || saved.loginPassword || '209801',
+      version: process.env.MC_VERSION || saved.version || 'auto',
+      autoLogin: process.env.MC_AUTOLOGIN !== 'false'
+    };
+    console.log(`[AutoConnect] Initiating auto-connect to ${target.host}:${target.port} as ${target.username}...`);
+    setTimeout(() => {
+      botManager.connect(target);
+    }, 2500);
+  }
 });
