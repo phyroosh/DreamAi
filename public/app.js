@@ -9,6 +9,27 @@ const valHealth = document.getElementById('val-health');
 const valFood = document.getElementById('val-food');
 const valPos = document.getElementById('val-pos');
 const valUptime = document.getElementById('val-uptime');
+const valXp = document.getElementById('val-xp');
+const valWeather = document.getElementById('val-weather');
+const valTime = document.getElementById('val-time');
+const valGamemode = document.getElementById('val-gamemode');
+
+const panelServerInfo = document.getElementById('panel-serverinfo');
+const infoIp = document.getElementById('info-ip');
+const infoVer = document.getElementById('info-ver');
+const infoBrand = document.getElementById('info-brand');
+const infoDim = document.getElementById('info-dim');
+const infoDiff = document.getElementById('info-diff');
+const inpSeed = document.getElementById('inp-seed');
+const btnSaveSeed = document.getElementById('btn-save-seed');
+
+const panelInventory = document.getElementById('panel-inventory');
+const invArmor = document.getElementById('inv-armor');
+const invItems = document.getElementById('inv-items');
+
+const panelPlayers = document.getElementById('panel-players');
+const listPlayers = document.getElementById('list-players');
+const badgePlayers = document.getElementById('badge-players');
 
 const formConnect = document.getElementById('form-connect');
 const inpHost = document.getElementById('inp-host');
@@ -231,10 +252,81 @@ socket.on('bot:status', (st) => {
   }
 
   panelTelemetry.classList.toggle('hidden', !isActive);
+  panelServerInfo.classList.toggle('hidden', !isActive);
+  panelInventory.classList.toggle('hidden', !isActive);
+  panelPlayers.classList.toggle('hidden', !isActive);
 
   if (st.health !== undefined) valHealth.textContent = `${st.health}/20`;
   if (st.food !== undefined) valFood.textContent = `${st.food}/20`;
   if (st.position) valPos.textContent = `${st.position.x}, ${st.position.y}, ${st.position.z}`;
+  
+  // New Expanded Stats
+  if (st.experience) valXp.textContent = `${st.experience.level} (${st.experience.progress}%)`;
+  if (st.weather) valWeather.textContent = st.weather;
+  if (st.timeOfDay) valTime.textContent = st.timeOfDay;
+  if (st.gameMode) valGamemode.textContent = st.gameMode.charAt(0).toUpperCase() + st.gameMode.slice(1);
+
+  // Server Info
+  if (st.server) infoIp.textContent = `${st.server.host}:${st.server.port}`;
+  if (st.mcVersion) infoVer.textContent = st.mcVersion;
+  if (st.serverBrand) infoBrand.textContent = st.serverBrand;
+  if (st.dimension) infoDim.textContent = st.dimension;
+  if (st.difficulty) infoDiff.textContent = st.difficulty;
+
+  // Inventory
+  if (st.inventory) {
+    const { items, armor, heldItem, offhand } = st.inventory;
+    
+    // Render Armor
+    const renderArmor = (name, data) => {
+      if (!data) return `<div class="armor-slot" title="Empty ${name}"><span style="opacity:0.2;">${name[0]}</span></div>`;
+      return `<div class="armor-slot" data-filled="true" title="${data.displayName}">✓</div>`;
+    };
+    invArmor.innerHTML = `
+      ${renderArmor('Helmet', armor.helmet)}
+      ${renderArmor('Chest', armor.chestplate)}
+      ${renderArmor('Legs', armor.leggings)}
+      ${renderArmor('Boots', armor.boots)}
+    `;
+
+    // Render Items
+    let itemsHtml = '';
+    
+    const renderItem = (label, data) => {
+      if (!data) return;
+      itemsHtml += `<div class="inv-item">
+        <div class="inv-item-name"><span class="inv-icon">🔹</span><span>${label}: ${data.displayName}</span></div>
+        <span class="inv-count">${data.count}</span>
+      </div>`;
+    };
+
+    renderItem('Held', heldItem);
+    renderItem('Offhand', offhand);
+
+    items.forEach(i => {
+      itemsHtml += `<div class="inv-item">
+        <div class="inv-item-name"><span class="inv-icon">📦</span><span>${i.displayName}</span></div>
+        <span class="inv-count">x${i.count}</span>
+      </div>`;
+    });
+
+    if (!itemsHtml) itemsHtml = '<div class="empty-text">Inventory Empty</div>';
+    invItems.innerHTML = itemsHtml;
+  }
+
+  // Players
+  if (st.onlinePlayers) {
+    badgePlayers.textContent = st.onlinePlayers.length;
+    let phtml = '';
+    st.onlinePlayers.forEach(p => {
+      phtml += `<div class="player-row">
+        <span>${p.username}</span>
+        <span class="player-ping">${p.ping ?? '?'}ms</span>
+      </div>`;
+    });
+    if (!phtml) phtml = '<div class="empty-text">No players found</div>';
+    listPlayers.innerHTML = phtml;
+  }
   
   if (st.state === 'SPAWNED') {
     if (!uptimeInterval) {
@@ -251,6 +343,16 @@ socket.on('bot:status', (st) => {
     valUptime.textContent = '00:00';
   }
 });
+
+// Seed Button
+if (btnSaveSeed) {
+  btnSaveSeed.onclick = () => {
+    const seed = inpSeed.value.trim();
+    socket.emit('seed:update', seed);
+    btnSaveSeed.textContent = '✓';
+    setTimeout(() => btnSaveSeed.textContent = 'Save', 1500);
+  };
+}
 
 socket.on('bot:chat', (msg) => {
   let senderName = msg.sender || (msg.isMe ? 'BOT' : 'CHAT');
@@ -302,6 +404,7 @@ socket.on('servers:updated', (srvs) => {
 socket.on('bot:settings', (st) => {
   if (!st) return;
   if (selAiModel && st.aiModel) selAiModel.value = st.aiModel;
+  if (inpSeed && st.worldSeed !== undefined) inpSeed.value = st.worldSeed;
   chkAntiAfk.checked = !!st.antiAfkEnabled;
   if (chkAutoEat) chkAutoEat.checked = st.autoEat !== false;
   inpInterval.value = st.antiAfkIntervalSec || 10;

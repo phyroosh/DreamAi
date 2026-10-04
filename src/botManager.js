@@ -129,6 +129,8 @@ export class BotManager extends EventEmitter {
     const hp = Math.round(this.bot.health ?? 20);
     const food = Math.round(this.bot.food ?? 20);
     const held = this.bot.heldItem ? this.bot.heldItem.name : 'empty hands';
+    const version = this.bot.version || 'Unknown';
+    const seed = this.settings.worldSeed || 'Unknown';
 
     let nearby = 'None';
     try {
@@ -149,13 +151,24 @@ export class BotManager extends EventEmitter {
 - Food: ${food}/20
 - Holding in hand: ${held}
 - Nearby Players: ${nearby}
+- Minecraft Version: ${version}
+- World Seed: ${seed}
 - Master Player: Phyroosh`;
   }
+
 
   getStatus() {
     let position = null;
     let health = 20;
     let food = 20;
+    let experience = { level: 0, points: 0, progress: 0 };
+    let weather = 'Clear';
+    let timeOfDay = 'Day';
+    let gameMode = 'Unknown';
+    let dimension = 'Unknown';
+    let difficulty = 'Unknown';
+    let serverBrand = '';
+    let mcVersion = '';
 
     if (this.bot && this.bot.entity) {
       position = {
@@ -165,6 +178,39 @@ export class BotManager extends EventEmitter {
       };
       health = Math.round(this.bot.health ?? 20);
       food = Math.round(this.bot.food ?? 20);
+
+      // Experience
+      if (this.bot.experience) {
+        experience = {
+          level: this.bot.experience.level ?? 0,
+          points: this.bot.experience.points ?? 0,
+          progress: Math.round((this.bot.experience.progress ?? 0) * 100)
+        };
+      }
+
+      // Weather
+      if (this.bot.thunderState > 0) weather = 'Thunder ⛈️';
+      else if (this.bot.isRaining) weather = 'Rain 🌧️';
+      else weather = 'Clear ☀️';
+
+      // Time of day
+      if (this.bot.time) {
+        const t = this.bot.time.timeOfDay;
+        if (t >= 0 && t < 6000) timeOfDay = 'Morning 🌅';
+        else if (t >= 6000 && t < 12000) timeOfDay = 'Day ☀️';
+        else if (t >= 12000 && t < 13000) timeOfDay = 'Dusk 🌇';
+        else if (t >= 13000 && t < 23000) timeOfDay = 'Night 🌙';
+        else timeOfDay = 'Dawn 🌄';
+      }
+
+      // Game info
+      if (this.bot.game) {
+        gameMode = this.bot.game.gameMode ?? 'Unknown';
+        dimension = this.bot.game.dimension ?? 'Unknown';
+        difficulty = ['Peaceful', 'Easy', 'Normal', 'Hard'][this.bot.game.difficulty] ?? String(this.bot.game.difficulty ?? 'Unknown');
+        serverBrand = this.bot.game.serverBrand ?? '';
+        mcVersion = this.bot.version ?? '';
+      }
     }
 
     return {
@@ -177,8 +223,67 @@ export class BotManager extends EventEmitter {
       uptime: this.spawnTime ? Math.floor((Date.now() - this.spawnTime) / 1000) : 0,
       antiAfkEnabled: this.settings.antiAfkEnabled,
       aiActive: !!this.aiChat.apiKey,
-      settings: this.settings
+      settings: this.settings,
+      // New expanded fields
+      experience,
+      weather,
+      timeOfDay,
+      gameMode,
+      dimension,
+      difficulty,
+      serverBrand,
+      mcVersion,
+      worldSeed: this.settings.worldSeed || '',
+      onlinePlayers: this.getOnlinePlayers(),
+      inventory: this.getInventory()
     };
+  }
+
+  getInventory() {
+    if (!this.bot || !this.bot.inventory) return { items: [], armor: {}, heldItem: null, offhand: null };
+
+    const items = this.bot.inventory.items().map(item => ({
+      name: item.name,
+      displayName: item.displayName || item.name,
+      count: item.count,
+      slot: item.slot
+    }));
+
+    // Armor slots
+    const slots = this.bot.inventory.slots;
+    const armorSlot = (idx) => {
+      const s = slots[idx];
+      return s ? { name: s.name, displayName: s.displayName || s.name, count: s.count } : null;
+    };
+
+    // Standard player inventory armor slot indices: head=5, chest=6, legs=7, feet=8 in mineflayer
+    const armor = {
+      helmet: armorSlot(5),
+      chestplate: armorSlot(6),
+      leggings: armorSlot(7),
+      boots: armorSlot(8)
+    };
+
+    // Held item
+    const held = this.bot.heldItem;
+    const heldItem = held ? { name: held.name, displayName: held.displayName || held.name, count: held.count } : null;
+
+    // Offhand (slot 45)
+    const off = slots[45];
+    const offhand = off ? { name: off.name, displayName: off.displayName || off.name, count: off.count } : null;
+
+    return { items, armor, heldItem, offhand };
+  }
+
+  getOnlinePlayers() {
+    if (!this.bot || !this.bot.players) return [];
+    return Object.values(this.bot.players)
+      .filter(p => p && p.username)
+      .map(p => ({
+        username: p.username,
+        ping: p.ping ?? null,
+        uuid: p.uuid ?? null
+      }));
   }
 
   async connect(serverConfig) {
@@ -647,8 +752,47 @@ export class BotManager extends EventEmitter {
     });
 
     bot.on('move', () => {
+      // Throttle status updates for position to avoid spam
+      const now = Date.now();
+      if (!this._lastMoveStatus || now - this._lastMoveStatus > 1000) {
+        this.emit('status', this.getStatus());
+        this._lastMoveStatus = now;
+      }
+    });
+
+    bot.on('time', () => {
+      const now = Date.now();
+      if (!this._lastTimeStatus || now - this._lastTimeStatus > 10000) {
+        this.emit('status', this.getStatus());
+        this._lastTimeStatus = now;
+      }
+    });
+
+    bot.on('rain', () => {
       this.emit('status', this.getStatus());
     });
+
+    bot.on('experience', () => {
+      this.emit('status', this.getStatus());
+    });
+
+    const updatePlayers = () => {
+      this.emit('status', this.getStatus());
+    };
+
+    bot.on('playerJoined', updatePlayers);
+    bot.on('playerLeft', updatePlayers);
+
+    const updateInventory = () => {
+      const now = Date.now();
+      if (!this._lastInvStatus || now - this._lastInvStatus > 1000) {
+        this.emit('status', this.getStatus());
+        this._lastInvStatus = now;
+      }
+    };
+
+    bot.inventory.on('updateSlot', updateInventory);
+
 
     bot.on('kicked', (reason) => {
       let kickReason = 'Unknown reason';

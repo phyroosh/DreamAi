@@ -176,6 +176,75 @@ details.advanced-settings summary { cursor: pointer; user-select: none; padding:
 }
 .cb-label input[type="checkbox"] { accent-color: var(--accent); }
 
+/* Server Info */
+.server-info-grid { display: flex; flex-direction: column; gap: 4px; }
+.info-row { display: flex; justify-content: space-between; font-size: 11px; }
+.info-row span:first-child { color: var(--text-muted); }
+.info-row span:last-child { font-weight: 500; font-family: var(--font-mono); }
+
+/* Inventory */
+.armor-row { display: flex; gap: 4px; margin-bottom: 8px; justify-content: space-between; }
+.armor-slot { 
+  flex: 1; 
+  background: var(--bg-surface); 
+  border: 1px solid var(--border); 
+  border-radius: var(--rad); 
+  height: 28px; 
+  display: flex; 
+  align-items: center; 
+  justify-content: center; 
+  font-size: 12px;
+  position: relative;
+}
+.armor-slot[data-filled="true"] { border-color: #a78bfa; background: rgba(167, 139, 250, 0.1); }
+.inventory-list { 
+  display: flex; 
+  flex-direction: column; 
+  gap: 4px; 
+  overflow-y: auto; 
+  padding-right: 4px;
+}
+.inv-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 6px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--rad);
+  font-size: 11px;
+}
+.inv-item-name { display: flex; align-items: center; gap: 6px; }
+.inv-icon { font-size: 12px; }
+.inv-count { 
+  font-family: var(--font-mono); 
+  background: rgba(255,255,255,0.1); 
+  padding: 1px 4px; 
+  border-radius: 4px; 
+  font-size: 10px;
+}
+
+/* Online Players */
+.player-list { 
+  display: flex; 
+  flex-direction: column; 
+  gap: 4px; 
+  overflow-y: auto; 
+  padding-right: 4px;
+}
+.player-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--rad);
+  font-size: 11px;
+}
+.player-head { width: 16px; height: 16px; border-radius: 2px; }
+.player-ping { margin-left: auto; color: var(--text-muted); font-size: 10px; font-family: var(--font-mono); }
+
 /* Server List */
 .list-panel { flex: 1; padding-bottom: 0; display: flex; flex-direction: column; border-bottom: none; }
 .server-list { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; padding-bottom: 16px; }

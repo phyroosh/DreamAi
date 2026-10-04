@@ -216,6 +216,11 @@ io.on('connection', (socket) => {
     }
   });
   socket.on('settings:update', (data) => botManager.updateSettings(data));
+  socket.on('seed:update', (seed) => {
+    botManager.updateSettings({ worldSeed: seed });
+    io.emit('bot:settings', storage.getSettings());
+    io.emit('bot:status', botManager.getStatus());
+  });
   socket.on('permitted:add', (users) => {
     try {
       const updated = botManager.addPermittedUsers(users);

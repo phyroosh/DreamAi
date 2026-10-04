@@ -26,23 +26,56 @@
       <!-- Telemetry (Hidden when disconnected) -->
       <section id="panel-telemetry" class="panel hidden">
         <h3 class="panel-title">Live Status</h3>
-        <div class="stats-grid">
-          <div class="stat-box">
-            <span class="stat-label">Health</span>
-            <span id="val-health" class="stat-value text-red">20/20</span>
+        <div class="stats-grid" id="main-stats-grid">
+          <div class="stat-box"><span class="stat-label">Health</span><span id="val-health" class="stat-value text-red">20/20</span></div>
+          <div class="stat-box"><span class="stat-label">Food</span><span id="val-food" class="stat-value text-orange">20/20</span></div>
+          <div class="stat-box"><span class="stat-label">Pos (X,Y,Z)</span><span id="val-pos" class="stat-value">--</span></div>
+          <div class="stat-box"><span class="stat-label">Uptime</span><span id="val-uptime" class="stat-value">00:00</span></div>
+          <div class="stat-box"><span class="stat-label">XP Level</span><span id="val-xp" class="stat-value" style="color: #a78bfa;">0</span></div>
+          <div class="stat-box"><span class="stat-label">Weather</span><span id="val-weather" class="stat-value">Clear ☀️</span></div>
+          <div class="stat-box"><span class="stat-label">Time</span><span id="val-time" class="stat-value">Day ☀️</span></div>
+          <div class="stat-box"><span class="stat-label">Gamemode</span><span id="val-gamemode" class="stat-value">Survival</span></div>
+        </div>
+      </section>
+
+      <!-- Server Info (Hidden when disconnected) -->
+      <section id="panel-serverinfo" class="panel hidden">
+        <h3 class="panel-title">Server Details</h3>
+        <div class="server-info-grid">
+          <div class="info-row"><span>IP</span><span id="info-ip">--</span></div>
+          <div class="info-row"><span>Version</span><span id="info-ver">--</span></div>
+          <div class="info-row"><span>Brand</span><span id="info-brand">--</span></div>
+          <div class="info-row"><span>Dimension</span><span id="info-dim">--</span></div>
+          <div class="info-row"><span>Difficulty</span><span id="info-diff">--</span></div>
+        </div>
+        <div class="seed-input-group" style="margin-top: 10px;">
+          <label style="font-size:10px; color:var(--text-muted); font-weight:600;">WORLD SEED</label>
+          <div style="display:flex; gap:6px; margin-top:2px;">
+            <input type="text" id="inp-seed" placeholder="Enter seed..." style="flex:1; padding:4px 6px; font-size:11px;">
+            <button id="btn-save-seed" class="btn btn-primary btn-sm" style="padding:4px 8px; font-size:11px;">Save</button>
           </div>
-          <div class="stat-box">
-            <span class="stat-label">Food</span>
-            <span id="val-food" class="stat-value text-orange">20/20</span>
-          </div>
-          <div class="stat-box">
-            <span class="stat-label">Pos (X,Y,Z)</span>
-            <span id="val-pos" class="stat-value">--</span>
-          </div>
-          <div class="stat-box">
-            <span class="stat-label">Uptime</span>
-            <span id="val-uptime" class="stat-value">00:00</span>
-          </div>
+        </div>
+      </section>
+
+      <!-- Inventory Panel (Hidden when disconnected) -->
+      <section id="panel-inventory" class="panel hidden" style="flex-shrink: 0; max-height: 200px; display: flex; flex-direction: column;">
+        <h3 class="panel-title">Inventory</h3>
+        <div class="armor-row" id="inv-armor">
+          <!-- Populated by JS -->
+        </div>
+        <div class="inventory-list" id="inv-items">
+          <!-- Populated by JS -->
+        </div>
+      </section>
+
+      <!-- Online Players (Hidden when disconnected) -->
+      <section id="panel-players" class="panel hidden" style="flex: 1; display: flex; flex-direction: column; overflow: hidden; padding-bottom: 0;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
+          <h3 class="panel-title" style="margin:0;">Players</h3>
+          <span id="badge-players" style="background:var(--bg-surface); padding:2px 6px; border-radius:10px; font-size:10px; font-weight:600; border:1px solid var(--border);">0</span>
+        </div>
+        <div class="player-list" id="list-players">
+          <!-- Populated by JS -->
         </div>
       </section>
 
