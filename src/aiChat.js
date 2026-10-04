@@ -1,11 +1,20 @@
 import dotenv from 'dotenv';
+import { analyzeMathInMessage, processCalcTags } from './mathEngine.js';
+import { isWebQuery, searchWeb } from './webSearch.js';
 
 dotenv.config();
+
+const MODEL_FALLBACKS = [
+  'nvidia/nemotron-3-super-120b-a12b',
+  'nvidia/nemotron-3-ultra-550b-a55b',
+  'meta/llama-3.2-11b-vision-instruct'
+];
 
 export class AiChatHandler {
   constructor(options = {}) {
     this.apiKey = options.apiKey || process.env.NVIDIA_API_KEY || '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';
-    this.model = options.model || process.env.NVIDIA_MODEL || 'meta/llama-3.2-11b-vision-instruct';
+    // Upgrade default to the 120B Super Reasoning model
+    this.model = options.model || process.env.NVIDIA_MODEL || 'nvidia/nemotron-3-super-120b-a12b';
     this.targetUser = (options.targetUser || process.env.AI_TARGET_USER || 'Phyroosh').trim().toLowerCase();
     
     // Support multiple trigger keywords (e.g. GPT and Dream)
@@ -24,14 +33,13 @@ export class AiChatHandler {
 
   /**
    * Strictly verifies both conditions:
-   * 1. Asked by player named 'Phyroosh' (case-insensitive)
+   * 1. Asked by player named 'Phyroosh' or allowed user (case-insensitive)
    * 2. Message mentions 'GPT' or 'Dream' (case-insensitive)
    */
   shouldRespond(sender, message, permittedUsers = []) {
     if (!sender || !message) return false;
     if (!this.apiKey) return false;
 
-    // Strict permitted user check (case-insensitive & whitespace trimmed)
     const lowerSender = sender.toLowerCase().trim();
     const isPermitted = permittedUsers.some(u => {
       const p = String(u).trim().toLowerCase();
@@ -80,9 +88,9 @@ export class AiChatHandler {
   }
 
   /**
-   * Queries NVIDIA NIM LLM with ambient chat log and world state, returning natural speech + actions
+   * Queries NVIDIA NIM LLM with verified Math Engine, live Internet Search, and ambient awareness
    */
-  async getReply(senderName, userMessage, contextInfo = '', recentChatLog = '') {
+  async getReply(senderName, userMessage, contextInfo = '', recentChatLog = '', onLog = null) {
     if (this.isProcessing) {
       return null;
     }
@@ -109,32 +117,64 @@ export class AiChatHandler {
       const cleanSender = String(senderName).trim();
       const effectiveMaster = cleanSender.toLowerCase() === 'harshu' ? 'Phyroosh' : cleanSender;
 
-      const systemPrompt = `You are an intelligent, friendly, completely natural Minecraft companion in-game replying to your master player ${effectiveMaster}. You answer to the names GPT and Dream.
+      // 1. Math Analysis: Compute exact verified numbers
+      let mathInsight = null;
+      try {
+        mathInsight = analyzeMathInMessage(userMessage);
+        if (mathInsight && onLog) {
+          onLog({ type: 'action', text: `[Math Engine] Verified calculation for "${userMessage}"` });
+        }
+      } catch (e) {}
+
+      // 2. Real-Time Web Search: Fetch live internet knowledge
+      let webInsight = null;
+      try {
+        if (isWebQuery(userMessage)) {
+          if (onLog) {
+            onLog({ type: 'system', text: `[Web Search] Searching internet for: "${userMessage}"...` });
+          }
+          webInsight = await searchWeb(userMessage);
+          if (webInsight && onLog) {
+            onLog({ type: 'action', text: `[Web Search] Retrieved live internet facts!` });
+          }
+        }
+      } catch (e) {}
+
+      let capabilitiesContext = '';
+      if (mathInsight) {
+        capabilitiesContext += `\n\n📐 VERIFIED MATHEMATICAL GROUND TRUTH (USE THESE EXACT NUMBERS):\n${mathInsight}`;
+      }
+      if (webInsight) {
+        capabilitiesContext += `\n\n🌐 LIVE REAL-TIME INTERNET SEARCH RESULTS:\n${webInsight}`;
+      }
+
+      const systemPrompt = `You are an ultra-intelligent, friendly, and natural Minecraft companion in-game replying to your master player ${effectiveMaster}. You answer to the names GPT and Dream.
 
 CRITICAL IDENTITY RULES:
 - Your master's real player name is "${effectiveMaster}".
 - "harshu" is ONLY a team name, NOT a person! NEVER call your master "harshu". Always address them as "${effectiveMaster}"!
 
+MATHEMATICAL & SCIENTIFIC PRECISION:
+- When calculating math, state the verified values directly and concisely.
+- For expressions like 2log2, explain the base clearly: "If base 10, 2log₁₀(2) ≈ 0.602; if base 2, it equals 2; if natural log, ≈ 1.386."
+- Never invent confusing formulas like 2^(log2(2)).
+
+REAL-TIME INTERNET ACCESS:
+- You have real-time internet search access. Use the provided search results to answer current events, facts, questions, and trivia with 100% accuracy.
+
 NO FIXED TEMPLATES:
 - Speak naturally, casually, and cheerfully like an active player friend on a Minecraft server.
-- NEVER use repetitive robotic formulas or canned phrases. Vary your wording naturally every time.
-- Keep your speech concise and strictly UNDER 140 CHARACTERS so it cleanly fits on one line in Minecraft chat. No linebreaks, no quotes, no markdown/asterisks.
+- NEVER use repetitive robotic formulas. Vary your wording naturally every time.
+- Keep your speech concise and strictly UNDER 180 CHARACTERS so it cleanly fits in Minecraft chat. No linebreaks, no quotes, no markdown/LaTeX formatting.
 
 STRICT RULES ON COMMANDS & SPEECH:
 - NEVER use /tellraw, /title, /me, /say, or admin broadcast commands! You are a normal player without OP permissions!
-- When explaining things (math, questions, advice, pythagoras theorem, etc.), ALWAYS speak directly in plain text!
+- When explaining things (math, questions, advice, lore), ALWAYS speak directly in plain text!
 - ONLY use [EXEC:/command] when the master explicitly asks for a player command like /tpa, /tpaccept, /spawn, /home, etc.
-- If the master asks you to whisper or speak privately, you can be conversational and your reply will be delivered as a private whisper!
 
 ACTION & COMMAND TAGS:
-Attach these tags to your message whenever ${effectiveMaster} requests an in-game action or server command. The bot engine will automatically execute them in the game world:
-- [EXEC:/command] : Execute any Minecraft server command. Examples:
-  * When ${effectiveMaster} asks you to accept a teleport/tpa: [EXEC:/tpaccept]
-  * When ${effectiveMaster} asks you to deny a teleport: [EXEC:/tpdeny]
-  * When ${effectiveMaster} asks you to teleport to him: [EXEC:/tpa ${effectiveMaster}]
-  * When ${effectiveMaster} asks you to go to spawn: [EXEC:/spawn]
-  * When ${effectiveMaster} asks you to go home: [EXEC:/home]
-  * Any other player command: [EXEC:/command]
+Attach these tags to your message whenever ${effectiveMaster} requests an in-game action or server command:
+- [EXEC:/command] : Execute any Minecraft server command (e.g. [EXEC:/tpaccept], [EXEC:/tpa ${effectiveMaster}], [EXEC:/spawn])
 - [ACTION:walk] : Walk and roam around the chamber / room.
 - [ACTION:eat] : Eat food from inventory to restore hunger.
 - [ACTION:jump] : Jump in the air.
@@ -143,12 +183,7 @@ Attach these tags to your message whenever ${effectiveMaster} requests an in-gam
 - [ACTION:sneak] : Crouch or sneak.
 - [ACTION:drop_item] : Drop your held item.
 - [ACTION:drop_all] : Drop all your inventory items.
-
-EXAMPLES OF NATURAL BEHAVIOR:
-- ${senderName}: "Dream accept my tpa" -> "[EXEC:/tpaccept] On it, bringing you over!"
-- ${senderName}: "GPT where are you?" -> "I'm right around 142, 65, -200 in the Overworld."
-- ${senderName}: "Dream jump and look at me" -> "[ACTION:look_at_player] [ACTION:jump] Boing! Right here beside you."
-- ${senderName}: "GPT what happened in chat?" -> (Consult RECENT SERVER CHAT LOG below and answer naturally).
+${capabilitiesContext}
 
 RECENT SERVER CHAT LOG:
 ${recentChatLog || '(No recent chat recorded yet)'}
@@ -164,27 +199,59 @@ ${contextInfo || 'Status: Active and in world'}`;
         ...this.history
       ];
 
-      const response = await fetch(this.apiUrl, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${this.apiKey}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          model: this.model,
-          messages,
-          temperature: 0.7,
-          max_tokens: 75
-        })
-      });
+      // Try candidates in order with automatic fallback
+      const candidateModels = [this.model, ...MODEL_FALLBACKS.filter(m => m !== this.model)];
+      let data = null;
+      let usedModel = this.model;
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`API error ${response.status}: ${errorText}`);
+      for (const candidateModel of candidateModels) {
+        try {
+          const ctrl = new AbortController();
+          const timeout = setTimeout(() => ctrl.abort(), 12000);
+
+          const response = await fetch(this.apiUrl, {
+            method: 'POST',
+            signal: ctrl.signal,
+            headers: {
+              'Authorization': `Bearer ${this.apiKey}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              model: candidateModel,
+              messages,
+              temperature: 0.2,
+              max_tokens: 800
+            })
+          });
+          clearTimeout(timeout);
+
+          if (response.ok) {
+            data = await response.json();
+            usedModel = candidateModel;
+            break;
+          }
+        } catch (err) {
+          // Attempt next fallback model
+        }
       }
 
-      const data = await response.json();
+      if (!data) {
+        throw new Error('All model attempts failed or timed out');
+      }
+
       let rawReply = data.choices?.[0]?.message?.content?.trim() || '';
+
+      // If reasoning model left content empty, extract conclusion from reasoning_content
+      if (!rawReply && data.choices?.[0]?.message?.reasoning_content) {
+        const reasoning = data.choices[0].message.reasoning_content;
+        const sentences = reasoning.split(/[.\n]/).filter(s => s.trim().length > 5);
+        if (sentences.length > 0) {
+          rawReply = sentences[sentences.length - 1].trim();
+        }
+      }
+
+      // Process any [CALC: ...] tags
+      rawReply = processCalcTags(rawReply);
 
       // Extract all [EXEC:/...] commands
       const commands = [];
@@ -203,12 +270,14 @@ ${contextInfo || 'Status: Active and in world'}`;
       rawReply = rawReply.replace(/\[ACTION:[a-zA-Z0-9_]+\]/gi, '');
 
       // Clean speech text
-      let speech = rawReply.replace(/[\r\n]+/g, ' ').replace(/["`*]/g, '').trim();
-      // Collapse multiple spaces
+      let speech = rawReply
+        .replace(/[\r\n]+/g, ' ')
+        .replace(/[\\$"*`]/g, '')
+        .trim();
       speech = speech.replace(/\s+/g, ' ');
 
-      if (speech.length > 180) {
-        speech = speech.substring(0, 177) + '...';
+      if (speech.length > 210) {
+        speech = speech.substring(0, 207) + '...';
       }
 
       this.history.push({

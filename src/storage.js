@@ -21,6 +21,7 @@ const DEFAULT_SETTINGS = {
   autoLogin: true,
   autoEat: true,
   autoEatThreshold: 16,
+  aiModel: 'nvidia/nemotron-3-super-120b-a12b',
   antiAfkEnabled: true,
   antiAfkIntervalSec: 8,
   antiAfkActions: {

@@ -24,12 +24,14 @@ export class BotManager extends EventEmitter {
     this.recentChatLog = [];
     this.recentEmittedChats = new Set();
 
-    // AI Companion & Physical Action Executor
-    this.aiChat = new AiChatHandler();
-    this.actionExecutor = new ActionExecutor(this);
-
     // Load initial settings
     this.settings = this.storage.getSettings();
+
+    // AI Companion & Physical Action Executor
+    this.aiChat = new AiChatHandler({
+      model: this.settings.aiModel || 'nvidia/nemotron-3-super-120b-a12b'
+    });
+    this.actionExecutor = new ActionExecutor(this);
 
     // Rolling buffer of recent system logs (last 100)
     this.systemLogs = [];
@@ -80,6 +82,9 @@ export class BotManager extends EventEmitter {
 
   updateSettings(newSettings) {
     this.settings = this.storage.saveSettings(newSettings);
+    if (newSettings.aiModel && this.aiChat) {
+      this.aiChat.model = newSettings.aiModel;
+    }
     if (this.state === 'SPAWNED') {
       this.resetAntiAfkTimer();
     }
@@ -717,8 +722,10 @@ export class BotManager extends EventEmitter {
 
     const actualPlayer = (sender.toLowerCase() === 'harshu' ? 'Phyroosh' : sender);
 
-    // Query LLM with full situational + ambient chat awareness
-    const result = await this.aiChat.getReply(actualPlayer, message, context, chatLog);
+    // Query LLM with verified Math Engine, live Web Search, and full chat awareness
+    const result = await this.aiChat.getReply(actualPlayer, message, context, chatLog, (logEvent) => {
+      this.emit('log', logEvent);
+    });
     if (result && this.state === 'SPAWNED' && this.bot) {
       // 1. Execute any server slash commands requested by AI
       if (result.commands && result.commands.length > 0) {

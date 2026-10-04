@@ -42,6 +42,7 @@ const chkSneak = document.getElementById('chk-sneak');
 const chkStep = document.getElementById('chk-step');
 const inpInterval = document.getElementById('inp-interval');
 const valInterval = document.getElementById('val-interval');
+const selAiModel = document.getElementById('sel-aimodel');
 const inpPermittedUsers = document.getElementById('inp-permitted-users');
 const btnSaveUsers = document.getElementById('btn-save-users');
 const saveIndicator = document.getElementById('save-indicator');
@@ -136,6 +137,7 @@ const syncSettings = () => {
   afkOpts.style.pointerEvents = chkAntiAfk.checked ? 'auto' : 'none';
   
   socket.emit('settings:update', {
+    aiModel: selAiModel ? selAiModel.value : 'nvidia/nemotron-3-super-120b-a12b',
     antiAfkEnabled: chkAntiAfk.checked,
     antiAfkIntervalSec: parseInt(inpInterval.value),
     autoEat: chkAutoEat ? chkAutoEat.checked : true,
@@ -150,6 +152,7 @@ const syncSettings = () => {
   });
 };
 
+if (selAiModel) selAiModel.onchange = syncSettings;
 chkAntiAfk.onchange = syncSettings;
 if (chkWalk) chkWalk.onchange = syncSettings;
 if (chkAutoEat) chkAutoEat.onchange = syncSettings;
@@ -298,6 +301,7 @@ socket.on('servers:updated', (srvs) => {
 
 socket.on('bot:settings', (st) => {
   if (!st) return;
+  if (selAiModel && st.aiModel) selAiModel.value = st.aiModel;
   chkAntiAfk.checked = !!st.antiAfkEnabled;
   if (chkAutoEat) chkAutoEat.checked = st.autoEat !== false;
   inpInterval.value = st.antiAfkIntervalSec || 10;
