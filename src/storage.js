@@ -23,6 +23,7 @@ const DEFAULT_SETTINGS = {
   autoEatThreshold: 16,
   aiModel: 'nvidia/nemotron-3-super-120b-a12b',
   worldSeed: '',
+  autoJoinSmp: true,
   antiAfkEnabled: true,
   antiAfkIntervalSec: 8,
   antiAfkActions: {

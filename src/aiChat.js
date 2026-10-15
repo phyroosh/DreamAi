@@ -189,6 +189,7 @@ Attach these tags to your message whenever ${effectiveMaster} requests an in-gam
 - [ACTION:sneak] : Crouch or sneak.
 - [ACTION:drop_item] : Drop your held item.
 - [ACTION:drop_all] : Drop all your inventory items.
+- [ACTION:lobby_select] : Right-click lobby item (Nether Star) and click the Grass Block in Server Selector to teleport to the SMP world.
 ${capabilitiesContext}
 
 RECENT SERVER CHAT LOG:

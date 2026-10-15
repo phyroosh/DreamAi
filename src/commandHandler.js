@@ -106,6 +106,14 @@ export class ActionExecutor {
           this.dropItems(true, sender);
           break;
 
+        case 'lobby_select':
+        case 'join_smp':
+        case 'select_world':
+        case 'click_grass':
+          this.botManager.emit('log', { type: 'action', text: `[Action] Joining SMP via Lobby Selector on order from ${sender}` });
+          await this.botManager.performLobbySelection();
+          break;
+
         default:
           console.log(`Unknown action: ${action}`);
       }

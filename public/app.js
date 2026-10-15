@@ -56,6 +56,7 @@ const chkAntiAfk = document.getElementById('chk-antiafk');
 const afkOpts = document.getElementById('antiafk-options');
 const chkWalk = document.getElementById('chk-walk');
 const chkAutoEat = document.getElementById('chk-autoeat');
+const chkAutoJoin = document.getElementById('chk-autojoin');
 const chkSwing = document.getElementById('chk-swing');
 const chkLook = document.getElementById('chk-look');
 const chkJump = document.getElementById('chk-jump');
@@ -162,6 +163,7 @@ const syncSettings = () => {
     antiAfkEnabled: chkAntiAfk.checked,
     antiAfkIntervalSec: parseInt(inpInterval.value),
     autoEat: chkAutoEat ? chkAutoEat.checked : true,
+    autoJoinSmp: chkAutoJoin ? chkAutoJoin.checked : true,
     antiAfkActions: {
       walkAround: chkWalk ? chkWalk.checked : true,
       swingArm: chkSwing.checked,
@@ -177,6 +179,7 @@ if (selAiModel) selAiModel.onchange = syncSettings;
 chkAntiAfk.onchange = syncSettings;
 if (chkWalk) chkWalk.onchange = syncSettings;
 if (chkAutoEat) chkAutoEat.onchange = syncSettings;
+if (chkAutoJoin) chkAutoJoin.onchange = syncSettings;
 chkSwing.onchange = syncSettings;
 chkLook.onchange = syncSettings;
 if (chkStep) chkStep.onchange = syncSettings;
@@ -413,6 +416,7 @@ socket.on('bot:settings', (st) => {
   if (inpSeed && st.worldSeed !== undefined) inpSeed.value = st.worldSeed;
   chkAntiAfk.checked = !!st.antiAfkEnabled;
   if (chkAutoEat) chkAutoEat.checked = st.autoEat !== false;
+  if (chkAutoJoin && st.autoJoinSmp !== undefined) chkAutoJoin.checked = st.autoJoinSmp !== false;
   inpInterval.value = st.antiAfkIntervalSec || 10;
   valInterval.textContent = inpInterval.value;
   if (st.antiAfkActions) {

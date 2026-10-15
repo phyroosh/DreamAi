@@ -36,6 +36,9 @@
           <div class="stat-box"><span class="stat-label">Time</span><span id="val-time" class="stat-value">Day ☀️</span></div>
           <div class="stat-box"><span class="stat-label">Gamemode</span><span id="val-gamemode" class="stat-value">Survival</span></div>
         </div>
+        <div style="margin-top: 8px;">
+          <button class="btn btn-secondary btn-sm" style="width:100%; font-size:11px;" data-action="lobby_select" title="Right-click Nether Star and left-click Grass Block in Server Selector">🌐 Join SMP (Lobby Selector)</button>
+        </div>
       </section>
 
       <!-- Server Info (Hidden when disconnected) -->
@@ -187,6 +190,14 @@
         </div>
 
         <div class="setting-group" style="margin-top:8px; border-top:1px solid var(--border); padding-top:12px;">
+          <label class="cb-label toggle-label">
+            <input type="checkbox" id="chk-autojoin" checked>
+            <strong>Auto-Join SMP (via Lobby Selector)</strong>
+          </label>
+          <p class="help-text">Automatically right-clicks Nether Star and clicks Grass Block on lobby spawn.</p>
+        </div>
+
+        <div class="setting-group" style="margin-top:8px; border-top:1px solid var(--border); padding-top:12px;">
           <h4>Manual Actions (Test)</h4>
           <div class="row" style="margin-top:6px;">
             <button class="btn btn-secondary btn-sm" data-action="walk">Walk</button>
@@ -194,6 +205,9 @@
             <button class="btn btn-secondary btn-sm" data-action="swing">Swing</button>
             <button class="btn btn-secondary btn-sm" data-action="look">Look</button>
             <button class="btn btn-secondary btn-sm" data-action="jump">Jump</button>
+          </div>
+          <div class="row" style="margin-top:6px;">
+            <button class="btn btn-primary btn-sm" style="width:100%;" data-action="lobby_select">🌐 Join SMP (Right-Click Star & Click Grass Block)</button>
           </div>
         </div>
 

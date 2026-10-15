@@ -833,6 +833,15 @@ export class BotManager extends EventEmitter {
       const title = extractText(window.title || '').replace(/§./g, '').trim();
       this.emit('log', { type: 'system', text: `[Server GUI] Window opened: "${title}" (id: ${window.id}, type: ${window.type})` });
       checkAuthPrompt(title, 'WINDOW');
+
+      // Auto-click Grass Block if Server Selector GUI opens
+      const lower = title.toLowerCase();
+      if (lower.includes('selector') || lower.includes('hyrix') || lower.includes('select server') || lower.includes('smp')) {
+        this.emit('log', { type: 'system', text: '[Auto-Selector] Server Selector menu detected! Auto-clicking Grass Block...' });
+        setTimeout(() => {
+          this.clickGrassInWindow(window);
+        }, 500);
+      }
     });
 
     bot.on('connect', () => {
@@ -866,6 +875,20 @@ export class BotManager extends EventEmitter {
             executeAuth('login', 'Default initial spawn login');
           }
         }, 1500);
+      }
+
+      // Auto-Lobby Selector: If in lobby (Nether Star in hotbar), auto-trigger selector
+      if (this.settings.autoJoinSmp !== false) {
+        setTimeout(() => {
+          if (this.state === 'SPAWNED' && this.bot && this.hasLobbyItem()) {
+            this.emit('log', { type: 'system', text: '[Auto-Selector] Detected Lobby Star in hand! Auto-selecting SMP in 2.5s...' });
+            setTimeout(() => {
+              if (this.state === 'SPAWNED' && this.bot) {
+                this.performLobbySelection();
+              }
+            }, 2500);
+          }
+        }, 3000);
       }
 
       this.resetAntiAfkTimer();
@@ -1353,8 +1376,138 @@ export class BotManager extends EventEmitter {
         }, 350);
         this.emit('log', { type: 'action', text: 'Manual: Jumped' });
         break;
+      case 'lobby_select':
+      case 'join_smp':
+      case 'select_world':
+      case 'click_grass':
+        this.emit('log', { type: 'action', text: 'Manual: Triggered Join SMP (Lobby Selector)' });
+        await this.performLobbySelection();
+        break;
       default:
         throw new Error(`Unknown action: ${actionType}`);
+    }
+  }
+
+  hasLobbyItem() {
+    if (!this.bot || !this.bot.inventory) return false;
+    const slots = this.bot.inventory.slots;
+    if (!slots) return false;
+    // Check hotbar slots 36..44
+    for (let s = 36; s <= 44; s++) {
+      const it = slots[s];
+      if (it) {
+        const name = (it.name || '').toLowerCase();
+        const disp = (it.displayName || '').toLowerCase();
+        if (name === 'nether_star' || name === 'compass' || disp.includes('select') || disp.includes('server')) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  async clickGrassInWindow(window) {
+    if (!this.bot || !window) return false;
+    const bot = this.bot;
+
+    let targetSlot = 13; // default center slot in 3-row chest (27 slots)
+    if (window.slots) {
+      for (let i = 0; i < Math.min(window.slots.length, 54); i++) {
+        const item = window.slots[i];
+        if (item) {
+          const name = (item.name || '').toLowerCase();
+          const disp = (item.displayName || '').toLowerCase();
+          if (name.includes('grass') || name.includes('mycelium') || disp.includes('smp') || disp.includes('survival') || disp.includes('play')) {
+            targetSlot = i;
+            this.emit('log', { type: 'system', text: `[Lobby Selector] Found Grass Block item "${item.displayName || item.name}" at slot ${i}` });
+            break;
+          }
+        }
+      }
+    }
+
+    this.emit('log', { type: 'action', text: `[Lobby Selector] Left-clicking slot ${targetSlot} (Grass Block) to teleport to SMP...` });
+    try {
+      await bot.clickWindow(targetSlot, 0, 0);
+      this.emit('log', { type: 'system', text: '✅ [Lobby Selector] Clicked! Teleporting to your last location / SMP...' });
+      return true;
+    } catch (err) {
+      this.emit('log', { type: 'error', text: `[Lobby Selector] Click failed: ${err.message}` });
+      return false;
+    }
+  }
+
+  async performLobbySelection() {
+    if (!this.bot || this.state !== 'SPAWNED') {
+      this.emit('log', { type: 'warn', text: '[Lobby Selector] Bot is not spawned in the world yet!' });
+      return false;
+    }
+
+    const bot = this.bot;
+
+    // If chest GUI is already open:
+    if (bot.currentWindow) {
+      this.emit('log', { type: 'system', text: `[Lobby Selector] Detected open chest GUI: "${bot.currentWindow.title || 'Chest'}"` });
+      return await this.clickGrassInWindow(bot.currentWindow);
+    }
+
+    // Step 1: Find Nether Star (or hotbar slot 4)
+    let hotbarSlot = 4; // default to slot 4 (Nether star)
+    try {
+      if (bot.inventory && bot.inventory.slots) {
+        for (let s = 36; s <= 44; s++) {
+          const it = bot.inventory.slots[s];
+          if (it) {
+            const name = (it.name || '').toLowerCase();
+            const disp = (it.displayName || '').toLowerCase();
+            if (name === 'nether_star' || name === 'compass' || disp.includes('select') || disp.includes('server')) {
+              hotbarSlot = s - 36;
+              break;
+            }
+          }
+        }
+      }
+    } catch (e) {}
+
+    this.emit('log', { type: 'action', text: `[Lobby Selector] Equipping lobby item in hotbar slot ${hotbarSlot}...` });
+    try {
+      bot.setQuickBarSlot(hotbarSlot);
+    } catch (e) {}
+
+    // Wait a brief moment then right-click (activate item)
+    await new Promise(r => setTimeout(r, 350));
+    this.emit('log', { type: 'action', text: '[Lobby Selector] Right-clicking item to open Server Selector chest...' });
+
+    // Prepare promise for window open
+    const windowPromise = new Promise((resolve) => {
+      const onOpen = (win) => {
+        resolve(win);
+      };
+      bot.once('windowOpen', onOpen);
+      setTimeout(() => {
+        bot.removeListener('windowOpen', onOpen);
+        resolve(null);
+      }, 4000);
+    });
+
+    try {
+      bot.activateItem();
+    } catch (e) {
+      this.emit('log', { type: 'warn', text: `[Lobby Selector] activateItem error: ${e.message}` });
+    }
+
+    const openedWindow = await windowPromise;
+    if (openedWindow || bot.currentWindow) {
+      const win = openedWindow || bot.currentWindow;
+      this.emit('log', { type: 'system', text: `[Lobby Selector] Chest GUI opened: "${win.title || 'Server Selector'}"` });
+      await new Promise(r => setTimeout(r, 400));
+      return await this.clickGrassInWindow(win);
+    } else {
+      this.emit('log', { type: 'warn', text: '[Lobby Selector] Window did not open after right-clicking. Retrying right click...' });
+      try {
+        bot.activateItem();
+      } catch (e) {}
+      return false;
     }
   }
 
