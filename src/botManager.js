@@ -235,7 +235,8 @@ export class BotManager extends EventEmitter {
       mcVersion,
       worldSeed: this.settings.worldSeed || '',
       onlinePlayers: this.getOnlinePlayers(),
-      inventory: this.getInventory()
+      inventory: this.getInventory(),
+      isReconnecting: !!this.reconnectTimer
     };
   }
 
@@ -502,7 +503,6 @@ export class BotManager extends EventEmitter {
 
   setupBotEvents(loginPassword, autoLogin) {
     const bot = this.bot;
-    let autoLogged = false;
 
     // Helper to recursively extract text from NBT or JSON chat components
     const extractText = (obj) => {
@@ -528,6 +528,136 @@ export class BotManager extends EventEmitter {
       }
       if (obj.with) result += extractText(obj.with);
       return result || '';
+    };
+
+    // Smart Auto-Auth State (Login & 2x Password Registration)
+    let authCompleted = false;
+    let lastAuthCommand = null;
+    let lastAuthTime = 0;
+    let authAttempts = 0;
+    let pendingAuth = null;
+    const MAX_AUTH_ATTEMPTS = 6;
+
+    const executeAuth = (commandType, reason) => {
+      if (!autoLogin || !loginPassword) return;
+      if (!this.bot) return;
+
+      const now = Date.now();
+      if (lastAuthCommand === commandType && (now - lastAuthTime) < 1800) {
+        return;
+      }
+      if (authAttempts >= MAX_AUTH_ATTEMPTS) {
+        return;
+      }
+
+      if (this.state !== 'SPAWNED') {
+        pendingAuth = { commandType, reason };
+        return;
+      }
+
+      authAttempts++;
+      lastAuthCommand = commandType;
+      lastAuthTime = now;
+
+      setTimeout(() => {
+        if (!this.bot || this.state !== 'SPAWNED') return;
+
+        if (commandType === 'register') {
+          this.emit('log', { 
+            type: 'system', 
+            text: `[Auto-Auth] Registering account (${reason}): /register ******* *******` 
+          });
+          // Password entered 2 times as required by AuthMe / LoginSecurity / PinGUI
+          this.bot.chat(`/register ${loginPassword} ${loginPassword}`);
+        } else if (commandType === 'login') {
+          this.emit('log', { 
+            type: 'system', 
+            text: `[Auto-Auth] Logging in (${reason}): /login *******` 
+          });
+          this.bot.chat(`/login ${loginPassword}`);
+        }
+      }, 400);
+    };
+
+    const checkAuthPrompt = (rawText, source = 'SERVER') => {
+      if (!autoLogin || !loginPassword || authCompleted) return;
+      if (!rawText || typeof rawText !== 'string') return;
+
+      const clean = rawText.replace(/§./g, '').trim();
+      const lower = clean.toLowerCase();
+      if (!lower) return;
+
+      // 1. Success verification
+      if (
+        lower.includes('successful login') ||
+        lower.includes('successfully logged in') ||
+        lower.includes('you are now logged in') ||
+        lower.includes('login successful') ||
+        lower.includes('registration successful') ||
+        lower.includes('successfully registered') ||
+        lower.includes('you are now registered') ||
+        lower.includes('login accepted') ||
+        lower.includes('authentication successful')
+      ) {
+        if (!authCompleted) {
+          authCompleted = true;
+          this.emit('log', { type: 'system', text: '✅ [Auto-Auth] Successfully authenticated with server!' });
+        }
+        return;
+      }
+
+      // 2. Registration triggers
+      const isRegisterPrompt =
+        lower.includes('/register') ||
+        lower.includes('/reg ') ||
+        lower.includes('register <') ||
+        lower.includes('register your') ||
+        lower.includes('please register') ||
+        lower.includes('use /register') ||
+        lower.includes('type /register') ||
+        lower.includes('not registered') ||
+        lower.includes('unregistered') ||
+        lower.includes('register with') ||
+        lower.includes('register first') ||
+        lower.includes('must register') ||
+        lower.includes('need to register') ||
+        lower.includes('create a password') ||
+        lower.includes('password twice') ||
+        lower.includes('password 2 times') ||
+        lower.includes('confirm password') ||
+        (lower.includes('register') && lower.includes('password'));
+
+      // 3. Login triggers
+      const isLoginPrompt =
+        lower.includes('/login') ||
+        lower.includes('/l ') ||
+        lower.includes('login <') ||
+        lower.includes('please login') ||
+        lower.includes('use /login') ||
+        lower.includes('type /login') ||
+        lower.includes('already registered') ||
+        lower.includes('login with') ||
+        lower.includes('login to continue') ||
+        lower.includes('enter your password to continue') ||
+        (lower.includes('login') && lower.includes('password'));
+
+      // Correction: If we tried to register, but account is already registered -> switch to login!
+      if (lastAuthCommand === 'register' && (lower.includes('already registered') || lower.includes('username taken') || lower.includes('use /login') || lower.includes('please login'))) {
+        executeAuth('login', 'Switched to login: account is already registered');
+        return;
+      }
+
+      // Correction: If we tried to login, but account is NOT registered -> switch to register!
+      if (lastAuthCommand === 'login' && (lower.includes('not registered') || lower.includes('please register') || lower.includes('use /register') || lower.includes('unregistered') || lower.includes('register first') || lower.includes('must register'))) {
+        executeAuth('register', 'Switched to register: account not registered yet');
+        return;
+      }
+
+      if (isRegisterPrompt) {
+        executeAuth('register', `Detected register prompt in ${source}`);
+      } else if (isLoginPrompt) {
+        executeAuth('login', `Detected login prompt in ${source}`);
+      }
     };
 
     if (bot._client) {
@@ -565,6 +695,11 @@ export class BotManager extends EventEmitter {
                 isWhisper = true;
               }
             }
+          } else if (meta.name === 'set_title_text' || meta.name === 'set_subtitle_text' || meta.name === 'set_action_bar_text' || meta.name === 'title') {
+            const titleText = extractText(data.text || data.content || data.value);
+            if (titleText) {
+              checkAuthPrompt(titleText, 'TITLE');
+            }
           } else if (meta.name === 'system_chat') {
             message = extractText(data.content || data.formattedMessage);
             if (message) {
@@ -590,16 +725,7 @@ export class BotManager extends EventEmitter {
                   if (cleanMsg.toLowerCase().includes('has requested to teleport') || cleanMsg.toLowerCase().includes('teleport request')) {
                     this.emit('log', { type: 'system', text: `[Notice] Incoming teleport request detected on server!` });
                   }
-                  const lower = cleanMsg.toLowerCase();
-                  if (autoLogin && loginPassword && !autoLogged && (lower.includes('/login <password>') || lower.includes('please login') || lower.includes('use /login'))) {
-                    autoLogged = true;
-                    setTimeout(() => {
-                      if (this.state === 'SPAWNED' && this.bot) {
-                        this.emit('log', { type: 'system', text: 'Executing auto-login command: /login *******' });
-                        this.bot.chat(`/login ${loginPassword}`);
-                      }
-                    }, 800);
-                  }
+                  checkAuthPrompt(cleanMsg, sysLabel);
                 }
               }
             }
@@ -633,16 +759,7 @@ export class BotManager extends EventEmitter {
                   if (cleanMsg.toLowerCase().includes('has requested to teleport') || cleanMsg.toLowerCase().includes('teleport request')) {
                     this.emit('log', { type: 'system', text: `[Notice] Incoming teleport request detected on server!` });
                   }
-                  const lower = cleanMsg.toLowerCase();
-                  if (autoLogin && loginPassword && !autoLogged && (lower.includes('/login <password>') || lower.includes('please login') || lower.includes('use /login'))) {
-                    autoLogged = true;
-                    setTimeout(() => {
-                      if (this.state === 'SPAWNED' && this.bot) {
-                        this.emit('log', { type: 'system', text: 'Executing auto-login command: /login *******' });
-                        this.bot.chat(`/login ${loginPassword}`);
-                      }
-                    }, 800);
-                  }
+                  checkAuthPrompt(cleanMsg, 'SERVER');
                 }
                 return;
               }
@@ -698,6 +815,7 @@ export class BotManager extends EventEmitter {
     bot.on('messagestr', (msg) => {
       if (!msg) return;
       const cleanMsg = String(msg).replace(/§./g, '').trim();
+      checkAuthPrompt(cleanMsg, 'CHAT');
       const whisperData = this.parseWhisper(cleanMsg);
       if (whisperData) {
         const identity = this.resolvePlayerAndTeam(whisperData.sender);
@@ -709,6 +827,12 @@ export class BotManager extends EventEmitter {
           this.handlePotentialAiChat(resolvedUsername, whisperData.message, resolvedTeam, true);
         }
       }
+    });
+
+    bot.on('windowOpen', (window) => {
+      const title = extractText(window.title || '').replace(/§./g, '').trim();
+      this.emit('log', { type: 'system', text: `[Server GUI] Window opened: "${title}" (id: ${window.id}, type: ${window.type})` });
+      checkAuthPrompt(title, 'WINDOW');
     });
 
     bot.on('connect', () => {
@@ -733,14 +857,15 @@ export class BotManager extends EventEmitter {
         this.emit('log', { type: 'system', text: `🤖 Chat-Aware AI active: Ready for natural conversation and orders from ${userSummary} (GPT/Dream)!` });
       }
 
-      if (autoLogin && loginPassword && !autoLogged) {
-        autoLogged = true;
+      if (pendingAuth) {
+        executeAuth(pendingAuth.commandType, pendingAuth.reason);
+        pendingAuth = null;
+      } else if (autoLogin && loginPassword && !authCompleted) {
         setTimeout(() => {
-          if (this.state === 'SPAWNED' && this.bot) {
-            this.emit('log', { type: 'system', text: 'Executing auto-login command: /login *******' });
-            this.bot.chat(`/login ${loginPassword}`);
+          if (this.state === 'SPAWNED' && this.bot && !authCompleted && authAttempts === 0) {
+            executeAuth('login', 'Default initial spawn login');
           }
-        }, 1200);
+        }, 1500);
       }
 
       this.resetAntiAfkTimer();
@@ -791,7 +916,17 @@ export class BotManager extends EventEmitter {
       }
     };
 
-    bot.inventory.on('updateSlot', updateInventory);
+    const hookInventory = () => {
+      if (bot.inventory && typeof bot.inventory.on === 'function') {
+        try {
+          bot.inventory.on('updateSlot', updateInventory);
+        } catch (e) {
+          // ignore
+        }
+      }
+    };
+    hookInventory();
+    bot.on('spawn', hookInventory);
 
 
     bot.on('kicked', (reason) => {
@@ -1289,9 +1424,11 @@ export class BotManager extends EventEmitter {
 
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
       if (!this.manualDisconnect && this.currentServer) {
         this.connect(this.currentServer);
       }
     }, delay);
+    this.emit('status', this.getStatus());
   }
 }

@@ -242,19 +242,25 @@ socket.on('bot:status', (st) => {
   elStatus.textContent = st.state;
   elStatus.className = `status-pill ${st.state.toLowerCase()}`;
   
-  const isActive = ['CONNECTING', 'CONNECTED', 'SPAWNED'].includes(st.state);
-  btnDisconnect.classList.toggle('hidden', !isActive);
+  const isDisconnected = st.state === 'DISCONNECTED' && !st.isReconnecting;
+  btnDisconnect.classList.toggle('hidden', isDisconnected);
   
   // Toggle Connect/Leave buttons in the quick connect form
   if (btnConnect && btnLeave) {
-    btnConnect.classList.toggle('hidden', isActive);
-    btnLeave.classList.toggle('hidden', !isActive);
+    btnConnect.classList.toggle('hidden', !isDisconnected);
+    btnLeave.classList.toggle('hidden', isDisconnected);
+    if (st.state === 'ERROR' || st.isReconnecting) {
+      btnLeave.textContent = '🛑 Cancel Reconnect';
+    } else {
+      btnLeave.textContent = '🛑 Leave Server';
+    }
   }
 
-  panelTelemetry.classList.toggle('hidden', !isActive);
-  panelServerInfo.classList.toggle('hidden', !isActive);
-  panelInventory.classList.toggle('hidden', !isActive);
-  panelPlayers.classList.toggle('hidden', !isActive);
+  const hasTelemetry = ['CONNECTED', 'SPAWNED'].includes(st.state);
+  panelTelemetry.classList.toggle('hidden', !hasTelemetry);
+  panelServerInfo.classList.toggle('hidden', !hasTelemetry);
+  panelInventory.classList.toggle('hidden', !hasTelemetry);
+  panelPlayers.classList.toggle('hidden', !hasTelemetry);
 
   if (st.health !== undefined) valHealth.textContent = `${st.health}/20`;
   if (st.food !== undefined) valFood.textContent = `${st.food}/20`;
