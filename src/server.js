@@ -31,13 +31,34 @@ const botManager = new BotManager(storage);
 
 // Process-level guards against unexpected library-level network drops
 process.on('uncaughtException', (err) => {
-  console.warn('[Server Guard] Caught exception:', err.message);
-  botManager.emit('log', { type: 'error', text: `Connection/Network error: ${err.message}` });
+  const msg = err?.message || String(err);
+  if (msg.includes("Unsupported protocol version '-1'") || msg.includes("version '-1'")) {
+    console.warn('[Server Guard] Aternos server is currently OFFLINE (protocol version -1).');
+    botManager.emit('log', { 
+      type: 'warn', 
+      text: '⚠️ Server is currently OFFLINE on Aternos! (Aternos returned offline protocol version -1). Please start your server on Aternos.org.' 
+    });
+    botManager.cleanup();
+    botManager.scheduleReconnect();
+    return;
+  }
+  console.warn('[Server Guard] Caught exception:', msg);
+  botManager.emit('log', { type: 'error', text: `Connection/Network error: ${msg}` });
   botManager.cleanup();
 });
 
 process.on('unhandledRejection', (reason) => {
   const msg = reason?.message || String(reason);
+  if (msg.includes("Unsupported protocol version '-1'") || msg.includes("version '-1'")) {
+    console.warn('[Server Guard] Aternos server is currently OFFLINE (protocol version -1).');
+    botManager.emit('log', { 
+      type: 'warn', 
+      text: '⚠️ Server is currently OFFLINE on Aternos! (Aternos returned offline protocol version -1). Please start your server on Aternos.org.' 
+    });
+    botManager.cleanup();
+    botManager.scheduleReconnect();
+    return;
+  }
   console.warn('[Server Guard] Unhandled rejection:', msg);
   botManager.emit('log', { type: 'error', text: `Connection rejection: ${msg}` });
   botManager.cleanup();
