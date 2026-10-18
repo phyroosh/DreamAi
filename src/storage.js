@@ -98,9 +98,9 @@ export function saveSettings(settings) {
 const DEFAULT_SERVERS = [
   {
     id: 'srv_skillora',
-    name: 'paid34.skilloraclouds.com',
+    name: 'paid34.skilloraclouds.com:25593',
     host: 'paid34.skilloraclouds.com',
-    port: 25565,
+    port: 25593,
     version: 'auto',
     username: 'Dream',
     loginPassword: '209801',
