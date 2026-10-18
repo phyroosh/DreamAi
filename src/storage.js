@@ -95,8 +95,18 @@ export function saveSettings(settings) {
     throw err;
   }
 }
-
-const DEFAULT_SERVERS = [];
+const DEFAULT_SERVERS = [
+  {
+    id: 'srv_skillora',
+    name: 'paid34.skilloraclouds.com',
+    host: 'paid34.skilloraclouds.com',
+    port: 25565,
+    version: 'auto',
+    username: 'Dream',
+    loginPassword: '209801',
+    autoLogin: true
+  }
+];
 
 export function getSavedServers() {
   try {

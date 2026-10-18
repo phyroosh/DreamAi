@@ -407,7 +407,22 @@ export class BotManager extends EventEmitter {
     }
 
     let host = (serverConfig.host || '').trim().toLowerCase();
-    let port = Number(serverConfig.port) || 25565;
+    let port = Number(serverConfig.port);
+
+    // Auto-detect host:port syntax (e.g. paid34.skilloraclouds.com:25585)
+    if (host.includes(':')) {
+      const parts = host.split(':');
+      host = parts[0].trim();
+      const parsedPort = parseInt(parts[1], 10);
+      if (!isNaN(parsedPort) && parsedPort > 0) {
+        port = parsedPort;
+      }
+    }
+
+    if (!port || isNaN(port) || port <= 0) {
+      port = 25565;
+    }
+
     const username = (serverConfig.username && serverConfig.username.trim()) || this.settings.defaultUsername || 'Dream';
     const loginPassword = serverConfig.loginPassword !== undefined ? serverConfig.loginPassword : this.settings.defaultPassword;
     const autoLogin = serverConfig.autoLogin !== undefined ? serverConfig.autoLogin : this.settings.autoLogin;
@@ -1333,6 +1348,14 @@ export class BotManager extends EventEmitter {
     this.clearTpaTimeout();
     const errorMsg = err?.message || String(err);
     this.emit('log', { type: 'error', text: `[CONNECT] Bot connection error: ${errorMsg}` });
+    if (errorMsg.includes('ECONNREFUSED')) {
+      const server = this.currentServer || {};
+      const targetStr = server.host ? `${server.host}:${server.port || 25565}` : 'target server';
+      this.emit('log', {
+        type: 'warn',
+        text: `💡 [Troubleshoot] Connection refused (${targetStr}). On cloud/shared hosting (like Skillora Clouds / Aternos): 1) Confirm your server is turned ON in your hosting dashboard, and 2) Ensure you entered your server's assigned port (not 0 or default 25565).`
+      });
+    }
     this.cleanup(false);
     this.scheduleReconnect();
   }

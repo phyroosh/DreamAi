@@ -462,11 +462,42 @@ socket.on('bot:settings', (st) => {
 });
 
 // UI Actions
+inpHost.addEventListener('input', () => {
+  const val = inpHost.value.trim();
+  if (val.includes(':')) {
+    const parts = val.split(':');
+    const h = parts[0].trim();
+    const p = parseInt(parts[1], 10);
+    if (h && !isNaN(p) && p > 0) {
+      inpHost.value = h;
+      inpPort.value = p;
+    }
+  }
+});
+
 formConnect.onsubmit = (e) => {
   e.preventDefault();
+  let host = inpHost.value.trim();
+  let port = parseInt(inpPort.value, 10);
+
+  if (host.includes(':')) {
+    const parts = host.split(':');
+    host = parts[0].trim();
+    const p = parseInt(parts[1], 10);
+    if (!isNaN(p) && p > 0) {
+      port = p;
+      inpPort.value = p;
+    }
+    inpHost.value = host;
+  }
+
+  if (isNaN(port) || port <= 0) {
+    port = 25565;
+  }
+
   socket.emit('bot:connect', {
-    host: inpHost.value.trim(),
-    port: parseInt(inpPort.value)||25565,
+    host,
+    port,
     username: inpUser.value.trim(),
     version: inpVersion.value.trim(),
     loginPassword: inpPass.value.trim(),
@@ -475,13 +506,26 @@ formConnect.onsubmit = (e) => {
 };
 
 btnBookmark.onclick = async () => {
-  const host = inpHost.value.trim();
+  let host = inpHost.value.trim();
   if(!host) return alert('Enter a host IP first');
+  let port = parseInt(inpPort.value, 10);
+  if (host.includes(':')) {
+    const parts = host.split(':');
+    host = parts[0].trim();
+    const p = parseInt(parts[1], 10);
+    if (!isNaN(p) && p > 0) {
+      port = p;
+      inpPort.value = p;
+    }
+    inpHost.value = host;
+  }
+  if (isNaN(port) || port <= 0) port = 25565;
+
   await fetch('/api/servers', {
     method: 'POST',
     headers:{'Content-Type':'application/json'},
     body: JSON.stringify({
-      host, port: parseInt(inpPort.value)||25565, username: inpUser.value.trim(),
+      host, port, username: inpUser.value.trim(),
       version: inpVersion.value.trim(), loginPassword: inpPass.value.trim(), autoLogin: inpAutoLogin.checked
     })
   });

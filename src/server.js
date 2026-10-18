@@ -299,9 +299,17 @@ server.listen(PORT, '0.0.0.0', () => {
     const saved = savedServers[0] || {};
     const targetHost = envHost || saved.host;
     if (targetHost) {
+      let finalHost = targetHost;
+      let finalPort = parseInt(process.env.MC_PORT || saved.port || '25565', 10);
+      if (finalHost.includes(':')) {
+        const [h, p] = finalHost.split(':');
+        finalHost = h.trim();
+        const parsed = parseInt(p, 10);
+        if (!isNaN(parsed) && parsed > 0) finalPort = parsed;
+      }
       const target = {
-        host: targetHost,
-        port: parseInt(process.env.MC_PORT || saved.port || '25565', 10),
+        host: finalHost,
+        port: finalPort,
         username: process.env.MC_USERNAME || saved.username || 'Dream',
         loginPassword: process.env.MC_PASSWORD || saved.loginPassword || '209801',
         version: process.env.MC_VERSION || saved.version || 'auto',
