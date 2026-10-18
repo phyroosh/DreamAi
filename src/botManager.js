@@ -423,10 +423,13 @@ export class BotManager extends EventEmitter {
       port = 25565;
     }
 
-    const username = (serverConfig.username && serverConfig.username.trim()) || this.settings.defaultUsername || 'Dream';
+    const username = (serverConfig.username && serverConfig.username.trim()) || this.settings.defaultUsername || 'Aaswaam';
     const loginPassword = serverConfig.loginPassword !== undefined ? serverConfig.loginPassword : this.settings.defaultPassword;
     const autoLogin = serverConfig.autoLogin !== undefined ? serverConfig.autoLogin : this.settings.autoLogin;
-    const version = serverConfig.version ? serverConfig.version.trim() : false;
+    let version = serverConfig.version ? serverConfig.version.trim() : '1.21.4';
+    if (!version || version.toLowerCase() === 'auto') {
+      version = '1.21.4';
+    }
 
     if (!host) {
       this.transitionTo(STATES.ERROR, 'Server host is required');

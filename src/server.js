@@ -310,9 +310,9 @@ server.listen(PORT, '0.0.0.0', () => {
       const target = {
         host: finalHost,
         port: finalPort,
-        username: process.env.MC_USERNAME || saved.username || 'Dream',
+        username: process.env.MC_USERNAME || saved.username || 'Aaswaam',
         loginPassword: process.env.MC_PASSWORD || saved.loginPassword || '209801',
-        version: process.env.MC_VERSION || saved.version || 'auto',
+        version: process.env.MC_VERSION || saved.version || '1.21.4',
         autoLogin: process.env.MC_AUTOLOGIN !== 'false'
       };
       console.log(`[AutoConnect] Initiating auto-connect to ${target.host}:${target.port} as ${target.username}...`);

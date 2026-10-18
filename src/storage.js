@@ -17,7 +17,7 @@ if (!fs.existsSync(DATA_DIR)) {
 // trustedPlayer is the account authorized to send TPA requests and control the AFK bot.
 const DEFAULT_SETTINGS = {
   trustedPlayer: process.env.TRUSTED_PLAYER || 'phyrooss',
-  defaultUsername: process.env.DEFAULT_USERNAME || 'Dream',
+  defaultUsername: process.env.DEFAULT_USERNAME || 'Aaswaam',
   defaultPassword: process.env.DEFAULT_PASSWORD || '209801',
   autoLogin: true,
   autoEat: true,
@@ -101,8 +101,8 @@ const DEFAULT_SERVERS = [
     name: 'paid34.skilloraclouds.com:25593',
     host: 'paid34.skilloraclouds.com',
     port: 25593,
-    version: 'auto',
-    username: 'Dream',
+    version: '1.21.4',
+    username: 'Aaswaam',
     loginPassword: '209801',
     autoLogin: true
   }
