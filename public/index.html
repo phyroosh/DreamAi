@@ -159,6 +159,19 @@
         <button id="btn-close-settings" class="btn-close">×</button>
       </div>
       <div class="modal-body">
+        <!-- Remote Bot Backend Host (for Bot-Hosting or external container monitoring) -->
+        <div class="setting-group" style="background: rgba(255,255,255,0.02); padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border); margin-bottom: 12px;">
+          <label style="font-size:12px; font-weight:600; color:var(--text-main);">🌐 Remote Bot Backend Host (Optional)</label>
+          <p class="help-text" style="margin-left:0; margin-top:2px; margin-bottom:6px;">
+            If hosting your bot on Bot-Hosting.net, paste your Bot-Hosting domain or IP:port here so this Render UI connects to it directly. Leave blank to use this Render server.
+          </p>
+          <div style="display:flex; gap:6px;">
+            <input type="text" id="inp-backend-url" class="compact-input" placeholder="e.g. https://mybot.bothosting.cloud or http://node.bot-hosting.net:25010" style="flex-grow:1; padding:6px; border-radius:4px; border:1px solid var(--border); background:var(--bg-dark); color:var(--text-main);">
+            <button id="btn-save-backend" class="btn btn-primary btn-sm">Set Host</button>
+            <button id="btn-reset-backend" class="btn btn-secondary btn-sm" title="Reset to default host">Reset</button>
+          </div>
+        </div>
+
         <div class="setting-group">
           <label class="cb-label toggle-label">
             <input type="checkbox" id="chk-antiafk" checked>

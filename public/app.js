@@ -1,9 +1,36 @@
-const socket = io();
+// Remote backend connection support for Bot-Hosting.net or custom VPS
+const savedBackend = (localStorage.getItem('dreamai_backend_url') || '').trim();
+const socket = savedBackend ? io(savedBackend) : io();
 
 // DOM
 const elStatus = document.getElementById('status-pill');
 const btnDisconnect = document.getElementById('btn-disconnect');
 const panelTelemetry = document.getElementById('panel-telemetry');
+
+const inpBackendUrl = document.getElementById('inp-backend-url');
+const btnSaveBackend = document.getElementById('btn-save-backend');
+const btnResetBackend = document.getElementById('btn-reset-backend');
+
+if (inpBackendUrl) {
+  inpBackendUrl.value = savedBackend;
+}
+if (btnSaveBackend) {
+  btnSaveBackend.onclick = () => {
+    const val = (inpBackendUrl?.value || '').trim();
+    if (val) {
+      localStorage.setItem('dreamai_backend_url', val);
+    } else {
+      localStorage.removeItem('dreamai_backend_url');
+    }
+    window.location.reload();
+  };
+}
+if (btnResetBackend) {
+  btnResetBackend.onclick = () => {
+    localStorage.removeItem('dreamai_backend_url');
+    window.location.reload();
+  };
+}
 
 const valHealth = document.getElementById('val-health');
 const valFood = document.getElementById('val-food');
