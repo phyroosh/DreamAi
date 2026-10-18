@@ -15,7 +15,7 @@ export class AiChatHandler {
     this.apiKey = options.apiKey !== undefined ? options.apiKey : (process.env.NVIDIA_API_KEY || '');
     // Upgrade default to the 120B Super Reasoning model
     this.model = options.model || process.env.NVIDIA_MODEL || 'nvidia/nemotron-3-super-120b-a12b';
-    this.targetUser = (options.targetUser || process.env.AI_TARGET_USER || process.env.TRUSTED_PLAYER || 'Phyroosh').trim().toLowerCase();
+    this.targetUser = (options.targetUser || process.env.AI_TARGET_USER || process.env.TRUSTED_PLAYER || 'phyrooss').trim().toLowerCase();
     
     // Support multiple trigger keywords (e.g. GPT and Dream)
     const rawTriggers = options.triggerWords || process.env.AI_TRIGGER_WORDS || process.env.AI_TRIGGER_WORD || 'GPT,Dream';
@@ -115,7 +115,7 @@ export class AiChatHandler {
       }
 
       const cleanSender = String(senderName).trim();
-      const effectiveMaster = cleanSender.toLowerCase() === 'harshu' ? 'Phyroosh' : cleanSender;
+      const effectiveMaster = cleanSender.toLowerCase() === 'harshu' ? (this.targetUser || 'phyrooss') : cleanSender;
 
       // 1. Math Analysis: Compute exact verified numbers
       let mathInsight = null;

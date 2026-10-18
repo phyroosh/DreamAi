@@ -16,7 +16,7 @@ if (!fs.existsSync(DATA_DIR)) {
 // Initial settings default:
 // trustedPlayer is the account authorized to send TPA requests and control the AFK bot.
 const DEFAULT_SETTINGS = {
-  trustedPlayer: process.env.TRUSTED_PLAYER || 'Phyroosh',
+  trustedPlayer: process.env.TRUSTED_PLAYER || 'phyrooss',
   defaultUsername: process.env.DEFAULT_USERNAME || 'Dream',
   defaultPassword: process.env.DEFAULT_PASSWORD || '209801',
   autoLogin: true,
@@ -49,7 +49,7 @@ function sanitizeGuestUsers(users) {
   const result = [];
   for (const u of users) {
     const clean = String(u || '').trim();
-    if (!clean || clean.toLowerCase() === 'phyroosh') continue;
+    if (!clean || clean.toLowerCase() === 'phyrooss' || clean.toLowerCase() === 'phyroosh') continue;
     const lower = clean.toLowerCase();
     if (!seen.has(lower)) {
       seen.add(lower);

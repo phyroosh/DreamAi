@@ -60,7 +60,7 @@ export class BotManager extends EventEmitter {
 
     // Load initial settings
     this.settings = this.storage.getSettings();
-    this.trustedPlayer = this.settings.trustedPlayer || process.env.TRUSTED_PLAYER || 'Phyroosh';
+    this.trustedPlayer = this.settings.trustedPlayer || process.env.TRUSTED_PLAYER || 'phyrooss';
     this.maxReconnectAttempts = Number(this.settings.maxReconnectAttempts || process.env.MAX_RECONNECT_ATTEMPTS || 10);
 
     // AI Companion & Physical Action Executor
@@ -989,7 +989,7 @@ export class BotManager extends EventEmitter {
               if (p) sender = p.username;
             }
             if (!sender && data.senderUuid === '5f0f0818-ef23-3ade-ae93-571e53719fb6') {
-              sender = 'Phyroosh';
+              sender = this.trustedPlayer || 'phyrooss';
             }
             if (!sender) {
               sender = extractText(data.networkName || data.senderName);
@@ -1070,7 +1070,7 @@ export class BotManager extends EventEmitter {
 
         if (data && data.senderUuid) {
           if (data.senderUuid === '5f0f0818-ef23-3ade-ae93-571e53719fb6') {
-            sender = 'Phyroosh';
+            sender = this.trustedPlayer || 'phyrooss';
           } else if (bot.players) {
             const matchedPlayer = Object.values(bot.players).find(pl => pl.uuid === data.senderUuid);
             if (matchedPlayer && matchedPlayer.username) {

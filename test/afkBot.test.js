@@ -11,7 +11,7 @@ describe('Minecraft AFK Bot - Core State Machine & Workflow', () => {
   beforeEach(() => {
     mockStorage = {
       getSettings: () => ({
-        trustedPlayer: 'Phyroosh',
+        trustedPlayer: 'phyrooss',
         defaultUsername: 'Dream',
         defaultPassword: 'password123',
         autoLogin: true,
@@ -66,16 +66,16 @@ describe('Minecraft AFK Bot - Core State Machine & Workflow', () => {
   });
 
   test('2. TPA detection correctly identifies trusted player requests and extraction command', () => {
-    const trustedMsg1 = 'Phyroosh has requested to teleport to you. Type /tpaccept to accept.';
+    const trustedMsg1 = 'phyrooss has requested to teleport to you. Type /tpaccept to accept.';
     const result1 = botManager.detectTpaRequest(trustedMsg1);
     assert.ok(result1);
-    assert.equal(result1.sender, 'Phyroosh');
+    assert.equal(result1.sender, 'phyrooss');
     assert.equal(result1.acceptCommand, '/tpaccept');
 
-    const trustedMsg2 = '[TPA] Phyroosh sent a teleport request. /tpyes';
+    const trustedMsg2 = '[TPA] phyrooss sent a teleport request. /tpyes';
     const result2 = botManager.detectTpaRequest(trustedMsg2);
     assert.ok(result2);
-    assert.equal(result2.sender, 'Phyroosh');
+    assert.equal(result2.sender, 'phyrooss');
     assert.equal(result2.acceptCommand, '/tpyes');
 
     const untrustedMsg = 'Griefer123 has requested to teleport to you.';
@@ -131,7 +131,7 @@ describe('Minecraft AFK Bot - Core State Machine & Workflow', () => {
     };
     botManager.bot.game = { dimension: 'Overworld' };
 
-    await botManager.acceptTpaRequest('/tpaccept', 'Phyroosh');
+    await botManager.acceptTpaRequest('/tpaccept', 'phyrooss');
 
     assert.equal(botManager.state, STATES.VERIFYING_TELEPORT);
     assert.ok(chatSent.includes('/tpaccept'));

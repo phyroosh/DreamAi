@@ -108,12 +108,12 @@ const appendLog = (senderTag, text, type, category = 'system', customTime = null
 
 // Allowed Users UI Renderer
 function renderAllowedUsers(users = []) {
-  const guestList = (users || []).filter(u => u && u.toLowerCase() !== 'phyroosh');
+  const guestList = (users || []).filter(u => u && u.toLowerCase() !== 'phyrooss' && u.toLowerCase() !== 'phyroosh');
 
   // 1. Render on Home Page Sidebar
   if (homeAllowedUsers) {
     if (guestList.length === 0) {
-      homeAllowedUsers.innerHTML = `<div class="empty-text">No guest users added.<br>Only <strong>Phyroosh</strong> has permission.</div>`;
+      homeAllowedUsers.innerHTML = `<div class="empty-text">No guest users added.<br>Only <strong>phyrooss</strong> has permission.</div>`;
     } else {
       homeAllowedUsers.innerHTML = '';
       guestList.forEach(u => {
@@ -134,7 +134,7 @@ function renderAllowedUsers(users = []) {
   // 2. Render inside Settings Modal
   if (modalAllowedUsers) {
     if (guestList.length === 0) {
-      modalAllowedUsers.innerHTML = `<span style="font-size:11px; color:var(--text-muted);">None (only Phyroosh has permission)</span>`;
+      modalAllowedUsers.innerHTML = `<span style="font-size:11px; color:var(--text-muted);">None (only phyrooss has permission)</span>`;
     } else {
       modalAllowedUsers.innerHTML = '';
       guestList.forEach(u => {
