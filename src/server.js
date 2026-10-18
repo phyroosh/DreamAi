@@ -33,10 +33,10 @@ const botManager = new BotManager(storage);
 process.on('uncaughtException', (err) => {
   const msg = err?.message || String(err);
   if (msg.includes("Unsupported protocol version '-1'") || msg.includes("version '-1'")) {
-    console.warn('[Server Guard] Aternos server is currently OFFLINE (protocol version -1).');
+    console.warn('[Server Guard] Server returned offline protocol version -1 (offline or sleeping).');
     botManager.emit('log', { 
       type: 'warn', 
-      text: '⚠️ Server is currently OFFLINE on Aternos! (Aternos returned offline protocol version -1). Please start your server on Aternos.org.' 
+      text: '⚠️ Target server returned offline protocol version -1 (server is currently offline or sleeping). Preparing recovery...' 
     });
     botManager.cleanup();
     botManager.scheduleReconnect();
@@ -50,10 +50,10 @@ process.on('uncaughtException', (err) => {
 process.on('unhandledRejection', (reason) => {
   const msg = reason?.message || String(reason);
   if (msg.includes("Unsupported protocol version '-1'") || msg.includes("version '-1'")) {
-    console.warn('[Server Guard] Aternos server is currently OFFLINE (protocol version -1).');
+    console.warn('[Server Guard] Server returned offline protocol version -1 (offline or sleeping).');
     botManager.emit('log', { 
       type: 'warn', 
-      text: '⚠️ Server is currently OFFLINE on Aternos! (Aternos returned offline protocol version -1). Please start your server on Aternos.org.' 
+      text: '⚠️ Target server returned offline protocol version -1 (server is currently offline or sleeping). Preparing recovery...' 
     });
     botManager.cleanup();
     botManager.scheduleReconnect();
@@ -290,23 +290,27 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(` Web UI: http://0.0.0.0:${PORT}`);
   console.log(`===============================================`);
 
-  // Auto-connect on startup for cloud hosting environments
-  const shouldAutoConnect = process.env.AUTO_CONNECT === 'true' || 
-    (process.env.AUTO_CONNECT !== 'false' && (process.env.MC_HOST || storage.getSavedServers().length > 0));
+  // Auto-connect on startup only if MC_HOST is explicitly defined in environment or a saved server exists
+  const envHost = (process.env.MC_HOST || '').trim();
+  const savedServers = storage.getSavedServers();
+  const shouldAutoConnect = process.env.AUTO_CONNECT === 'true' && (envHost || savedServers.length > 0);
 
   if (shouldAutoConnect) {
-    const saved = storage.getSavedServers()[0] || {};
-    const target = {
-      host: process.env.MC_HOST || saved.host || 'hyrixsmp3.aternos.me',
-      port: parseInt(process.env.MC_PORT || saved.port || '26743', 10),
-      username: process.env.MC_USERNAME || saved.username || 'Dream',
-      loginPassword: process.env.MC_PASSWORD || saved.loginPassword || '209801',
-      version: process.env.MC_VERSION || saved.version || 'auto',
-      autoLogin: process.env.MC_AUTOLOGIN !== 'false'
-    };
-    console.log(`[AutoConnect] Initiating auto-connect to ${target.host}:${target.port} as ${target.username}...`);
-    setTimeout(() => {
-      botManager.connect(target);
-    }, 2500);
+    const saved = savedServers[0] || {};
+    const targetHost = envHost || saved.host;
+    if (targetHost) {
+      const target = {
+        host: targetHost,
+        port: parseInt(process.env.MC_PORT || saved.port || '25565', 10),
+        username: process.env.MC_USERNAME || saved.username || 'Dream',
+        loginPassword: process.env.MC_PASSWORD || saved.loginPassword || '209801',
+        version: process.env.MC_VERSION || saved.version || 'auto',
+        autoLogin: process.env.MC_AUTOLOGIN !== 'false'
+      };
+      console.log(`[AutoConnect] Initiating auto-connect to ${target.host}:${target.port} as ${target.username}...`);
+      setTimeout(() => {
+        botManager.connect(target);
+      }, 2500);
+    }
   }
 });

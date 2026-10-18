@@ -12,10 +12,10 @@ const MODEL_FALLBACKS = [
 
 export class AiChatHandler {
   constructor(options = {}) {
-    this.apiKey = options.apiKey || process.env.NVIDIA_API_KEY || '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';
+    this.apiKey = options.apiKey !== undefined ? options.apiKey : (process.env.NVIDIA_API_KEY || '');
     // Upgrade default to the 120B Super Reasoning model
     this.model = options.model || process.env.NVIDIA_MODEL || 'nvidia/nemotron-3-super-120b-a12b';
-    this.targetUser = (options.targetUser || process.env.AI_TARGET_USER || 'Phyroosh').trim().toLowerCase();
+    this.targetUser = (options.targetUser || process.env.AI_TARGET_USER || process.env.TRUSTED_PLAYER || 'Phyroosh').trim().toLowerCase();
     
     // Support multiple trigger keywords (e.g. GPT and Dream)
     const rawTriggers = options.triggerWords || process.env.AI_TRIGGER_WORDS || process.env.AI_TRIGGER_WORD || 'GPT,Dream';
@@ -298,6 +298,133 @@ ${contextInfo || 'Status: Active and in world'}`;
       return null;
     } finally {
       this.isProcessing = false;
+    }
+  }
+
+  /**
+   * Interprets an unfamiliar server message to detect teleport requests or teleport outcomes.
+   * Deterministic code should be tried first. Only invoke LLM when contextual reasoning is needed.
+   * Returns: { isTpaRequest, sender, acceptCommand, isTeleportComplete, isTeleportFailed, reason }
+   */
+  async interpretTeleportMessage(rawMessage, recentChat = []) {
+    if (!this.apiKey || !rawMessage) return null;
+
+    const messages = [
+      {
+        role: 'system',
+        content: `You are a Minecraft server message interpreter.
+Analyze the given server message in the context of recent chat lines.
+Determine:
+1. Is this an incoming teleport request (TPA request)?
+2. Who sent the teleport request (username)?
+3. What exact Minecraft command should be typed to accept this request? (e.g. "/tpaccept", "/tpyes", "/tpaccept <name>", etc.)
+4. Is this a notification that a teleport has completed successfully?
+5. Is this a notification that a teleport has failed, timed out, or was cancelled?
+
+Respond ONLY with a valid JSON object with these keys:
+{
+  "isTpaRequest": boolean,
+  "sender": string or null,
+  "acceptCommand": string or null,
+  "isTeleportComplete": boolean,
+  "isTeleportFailed": boolean,
+  "reason": string
+}`
+      },
+      {
+        role: 'user',
+        content: `Recent chat context:\n${recentChat.slice(-5).join('\n')}\n\nTarget Message to analyze:\n"${rawMessage}"`
+      }
+    ];
+
+    try {
+      const ctrl = new AbortController();
+      const timeout = setTimeout(() => ctrl.abort(), 8000);
+
+      const response = await fetch(this.apiUrl, {
+        method: 'POST',
+        signal: ctrl.signal,
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: this.model,
+          messages,
+          temperature: 0.0,
+          max_tokens: 250
+        })
+      });
+      clearTimeout(timeout);
+
+      if (!response.ok) return null;
+      const data = await response.json();
+      const content = data.choices?.[0]?.message?.content?.trim() || '';
+      
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        return JSON.parse(jsonMatch[0]);
+      }
+      return null;
+    } catch (err) {
+      return null;
+    }
+  }
+
+  /**
+   * Diagnoses an unexpected server disconnection or state error and suggests recovery action.
+   */
+  async diagnoseDisconnection(reason, recentChat = []) {
+    if (!this.apiKey) return null;
+
+    const messages = [
+      {
+        role: 'system',
+        content: `You are a Minecraft network diagnostics assistant.
+Analyze this disconnection/kick reason and recent chat to provide a brief 1-sentence diagnostic explanation and a 1-sentence recovery recommendation.
+Respond ONLY with JSON:
+{
+  "explanation": "...",
+  "recommendation": "...",
+  "shouldRetry": boolean
+}`
+      },
+      {
+        role: 'user',
+        content: `Disconnection Reason: ${reason}\nRecent Chat:\n${recentChat.slice(-5).join('\n')}`
+      }
+    ];
+
+    try {
+      const ctrl = new AbortController();
+      const timeout = setTimeout(() => ctrl.abort(), 8000);
+
+      const response = await fetch(this.apiUrl, {
+        method: 'POST',
+        signal: ctrl.signal,
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: this.model,
+          messages,
+          temperature: 0.1,
+          max_tokens: 250
+        })
+      });
+      clearTimeout(timeout);
+
+      if (!response.ok) return null;
+      const data = await response.json();
+      const content = data.choices?.[0]?.message?.content?.trim() || '';
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        return JSON.parse(jsonMatch[0]);
+      }
+      return null;
+    } catch (err) {
+      return null;
     }
   }
 }

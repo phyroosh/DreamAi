@@ -259,7 +259,7 @@ socket.on('bot:status', (st) => {
     }
   }
 
-  const hasTelemetry = ['CONNECTED', 'SPAWNED'].includes(st.state);
+  const hasTelemetry = ['JOINED', 'WAITING_FOR_TPA', 'ACCEPTING_TPA', 'VERIFYING_TELEPORT', 'AFK', 'SPAWNED', 'CONNECTED'].includes(st.state);
   panelTelemetry.classList.toggle('hidden', !hasTelemetry);
   panelServerInfo.classList.toggle('hidden', !hasTelemetry);
   panelInventory.classList.toggle('hidden', !hasTelemetry);

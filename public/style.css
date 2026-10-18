@@ -51,10 +51,15 @@ body {
   text-transform: uppercase;
   border: 1px solid var(--border);
 }
-.status-pill.disconnected { color: var(--text-muted); }
-.status-pill.connecting { color: #f59e0b; border-color: #f59e0b; }
-.status-pill.connected, .status-pill.spawned { color: var(--success); border-color: var(--success); }
-.status-pill.error { color: var(--danger); border-color: var(--danger); }
+.status-pill.disconnected { color: var(--text-muted); border-color: var(--border); }
+.status-pill.initializing, .status-pill.connecting { color: #f59e0b; border-color: #f59e0b; background: rgba(245, 158, 11, 0.08); }
+.status-pill.joined { color: #38bdf8; border-color: #38bdf8; background: rgba(56, 189, 248, 0.08); }
+.status-pill.waiting_for_tpa { color: #c084fc; border-color: #c084fc; background: rgba(192, 132, 252, 0.08); }
+.status-pill.accepting_tpa { color: #fbbf24; border-color: #fbbf24; background: rgba(251, 191, 36, 0.12); }
+.status-pill.verifying_teleport { color: #818cf8; border-color: #818cf8; background: rgba(129, 140, 248, 0.12); }
+.status-pill.afk { color: #10b981; border-color: #10b981; background: rgba(16, 185, 129, 0.15); box-shadow: 0 0 10px rgba(16, 185, 129, 0.2); }
+.status-pill.reconnecting { color: #f97316; border-color: #f97316; background: rgba(249, 115, 22, 0.08); }
+.status-pill.error { color: var(--danger); border-color: var(--danger); background: rgba(239, 68, 68, 0.08); }
 
 /* Buttons */
 .btn {

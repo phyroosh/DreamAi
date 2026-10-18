@@ -5,31 +5,68 @@ import net from 'net';
 import { AiChatHandler } from './aiChat.js';
 import { ActionExecutor } from './commandHandler.js';
 
+export const STATES = Object.freeze({
+  INITIALIZING: 'INITIALIZING',
+  CONNECTING: 'CONNECTING',
+  JOINED: 'JOINED',
+  WAITING_FOR_TPA: 'WAITING_FOR_TPA',
+  ACCEPTING_TPA: 'ACCEPTING_TPA',
+  VERIFYING_TELEPORT: 'VERIFYING_TELEPORT',
+  AFK: 'AFK',
+  DISCONNECTED: 'DISCONNECTED',
+  RECONNECTING: 'RECONNECTING',
+  ERROR: 'ERROR'
+});
+
+export const VALID_TRANSITIONS = {
+  [STATES.INITIALIZING]: [STATES.CONNECTING, STATES.ERROR, STATES.DISCONNECTED],
+  [STATES.CONNECTING]: [STATES.JOINED, STATES.ERROR, STATES.DISCONNECTED, STATES.RECONNECTING],
+  [STATES.JOINED]: [STATES.WAITING_FOR_TPA, STATES.ACCEPTING_TPA, STATES.DISCONNECTED, STATES.RECONNECTING, STATES.ERROR],
+  [STATES.WAITING_FOR_TPA]: [STATES.ACCEPTING_TPA, STATES.AFK, STATES.DISCONNECTED, STATES.RECONNECTING, STATES.ERROR],
+  [STATES.ACCEPTING_TPA]: [STATES.VERIFYING_TELEPORT, STATES.WAITING_FOR_TPA, STATES.DISCONNECTED, STATES.RECONNECTING, STATES.ERROR],
+  [STATES.VERIFYING_TELEPORT]: [STATES.AFK, STATES.WAITING_FOR_TPA, STATES.DISCONNECTED, STATES.RECONNECTING, STATES.ERROR],
+  [STATES.AFK]: [STATES.WAITING_FOR_TPA, STATES.ACCEPTING_TPA, STATES.DISCONNECTED, STATES.RECONNECTING, STATES.ERROR],
+  [STATES.DISCONNECTED]: [STATES.INITIALIZING, STATES.CONNECTING, STATES.RECONNECTING, STATES.ERROR],
+  [STATES.RECONNECTING]: [STATES.INITIALIZING, STATES.CONNECTING, STATES.DISCONNECTED, STATES.ERROR],
+  [STATES.ERROR]: [STATES.INITIALIZING, STATES.CONNECTING, STATES.DISCONNECTED]
+};
+
 export class BotManager extends EventEmitter {
   constructor(storage) {
     super();
     this.storage = storage;
     this.bot = null;
-    this.state = 'DISCONNECTED'; // DISCONNECTED, CONNECTING, CONNECTED, SPAWNED, ERROR
+    this.state = STATES.DISCONNECTED;
     this.currentServer = null;
     this.antiAfkTimer = null;
     this.isRoaming = false;
     this.isEating = false;
     this.manualDisconnect = false;
     this.reconnectTimer = null;
+    this.reconnectAttempts = 0;
     this.connectionWatchdog = null;
+    this.tpaTimeoutTimer = null;
     this.spawnTime = null;
 
-    // Rolling buffer of recent server chat for ambient awareness (last 20 messages)
+    // Farm & Teleport verification
+    this.preTeleportPos = null;
+    this.preTeleportDim = null;
+    this.farmLocation = null;
+    this.lastTeleportRequester = null;
+
+    // Rolling buffer of recent server chat for ambient awareness (last 25 messages)
     this.recentChatLog = [];
     this.recentEmittedChats = new Set();
 
     // Load initial settings
     this.settings = this.storage.getSettings();
+    this.trustedPlayer = this.settings.trustedPlayer || process.env.TRUSTED_PLAYER || 'Phyroosh';
+    this.maxReconnectAttempts = Number(this.settings.maxReconnectAttempts || process.env.MAX_RECONNECT_ATTEMPTS || 10);
 
     // AI Companion & Physical Action Executor
     this.aiChat = new AiChatHandler({
-      model: this.settings.aiModel || 'nvidia/nemotron-3-super-120b-a12b'
+      model: this.settings.aiModel || 'nvidia/nemotron-3-super-120b-a12b',
+      targetUser: this.trustedPlayer
     });
     this.actionExecutor = new ActionExecutor(this);
 
@@ -53,11 +90,18 @@ export class BotManager extends EventEmitter {
     }
   }
 
+  clearTpaTimeout() {
+    if (this.tpaTimeoutTimer) {
+      clearTimeout(this.tpaTimeoutTimer);
+      this.tpaTimeoutTimer = null;
+    }
+  }
+
   addChatToRecentLog(sender, text) {
     if (!text || !text.trim()) return;
     const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
     this.recentChatLog.push(`[${time}] ${sender}: ${text.trim()}`);
-    if (this.recentChatLog.length > 20) {
+    if (this.recentChatLog.length > 25) {
       this.recentChatLog.shift();
     }
   }
@@ -80,25 +124,83 @@ export class BotManager extends EventEmitter {
     return true;
   }
 
+  /**
+   * Explicit State Machine Transition with validation and logging
+   */
+  transitionTo(nextState, reason = '') {
+    const prevState = this.state;
+    if (prevState === nextState) return true;
+
+    const allowed = VALID_TRANSITIONS[prevState] || [];
+    if (!allowed.includes(nextState)) {
+      this.emit('log', {
+        type: 'warn',
+        text: `[STATE] Transition rejected: ${prevState} -> ${nextState} (${reason || 'invalid transition'})`
+      });
+      return false;
+    }
+
+    this.state = nextState;
+    this.emit('stateChange', { from: prevState, to: nextState, reason });
+    this.emit('status', this.getStatus());
+
+    // Standardized log output
+    switch (nextState) {
+      case STATES.CONNECTING:
+        this.emit('log', { type: 'system', text: `[CONNECT] Connecting to the server...` });
+        break;
+      case STATES.JOINED:
+        this.emit('log', { type: 'system', text: `[CONNECT] Successfully joined the server.` });
+        break;
+      case STATES.WAITING_FOR_TPA:
+        this.emit('log', { type: 'system', text: `[TPA] Waiting for a request from the trusted player (${this.trustedPlayer})...` });
+        break;
+      case STATES.ACCEPTING_TPA:
+        this.emit('log', { type: 'system', text: `[TPA] Trusted teleport request detected. Accepting...` });
+        break;
+      case STATES.VERIFYING_TELEPORT:
+        this.emit('log', { type: 'system', text: `[TPA] Teleport accepted. Verifying destination...` });
+        break;
+      case STATES.AFK:
+        const coords = this.farmLocation
+          ? ` at farm (${this.farmLocation.x}, ${this.farmLocation.y}, ${this.farmLocation.z})`
+          : '';
+        this.emit('log', { type: 'system', text: `[AFK] Teleport confirmed. Bot is now standing still${coords}.` });
+        break;
+      default:
+        break;
+    }
+
+    return true;
+  }
+
   updateSettings(newSettings) {
     this.settings = this.storage.saveSettings(newSettings);
+    if (newSettings.trustedPlayer) {
+      this.trustedPlayer = String(newSettings.trustedPlayer).trim();
+      if (this.aiChat) this.aiChat.targetUser = this.trustedPlayer.toLowerCase();
+    }
+    if (newSettings.maxReconnectAttempts) {
+      this.maxReconnectAttempts = Number(newSettings.maxReconnectAttempts);
+    }
     if (newSettings.aiModel && this.aiChat) {
       this.aiChat.model = newSettings.aiModel;
     }
-    if (this.state === 'SPAWNED') {
+    if (this.hasSpawned()) {
       this.resetAntiAfkTimer();
     }
     this.emit('settings', this.settings);
+    this.emit('status', this.getStatus());
   }
 
   addPermittedUsers(users) {
     const rawList = Array.isArray(users) ? users : String(users || '').split(',');
-    const current = (this.settings.permittedUsers || []).filter(u => u && u.toLowerCase() !== 'phyroosh');
+    const current = (this.settings.permittedUsers || []).filter(u => u && u.toLowerCase() !== this.trustedPlayer.toLowerCase());
     const updated = [...current];
 
     for (const item of rawList) {
       const clean = String(item || '').trim();
-      if (!clean || clean.toLowerCase() === 'phyroosh') continue;
+      if (!clean || clean.toLowerCase() === this.trustedPlayer.toLowerCase()) continue;
       if (!updated.some(u => u.toLowerCase() === clean.toLowerCase())) {
         updated.push(clean);
       }
@@ -110,13 +212,23 @@ export class BotManager extends EventEmitter {
 
   removePermittedUser(username) {
     const cleanTarget = String(username || '').trim().toLowerCase();
-    if (cleanTarget === 'phyroosh') {
+    if (cleanTarget === this.trustedPlayer.toLowerCase()) {
       return this.settings.permittedUsers || [];
     }
-    const current = (this.settings.permittedUsers || []).filter(u => u && u.toLowerCase() !== 'phyroosh');
+    const current = (this.settings.permittedUsers || []).filter(u => u && u.toLowerCase() !== this.trustedPlayer.toLowerCase());
     const updated = current.filter(u => u.trim().toLowerCase() !== cleanTarget);
     this.updateSettings({ permittedUsers: updated });
     return updated;
+  }
+
+  hasSpawned() {
+    return [
+      STATES.JOINED,
+      STATES.WAITING_FOR_TPA,
+      STATES.ACCEPTING_TPA,
+      STATES.VERIFYING_TELEPORT,
+      STATES.AFK
+    ].includes(this.state);
   }
 
   getBotContext() {
@@ -141,9 +253,7 @@ export class BotManager extends EventEmitter {
           return `${p.username} (${dist}m away)`;
         });
       if (players.length > 0) nearby = players.slice(0, 4).join(', ');
-    } catch (e) {
-      // ignore
-    }
+    } catch (e) {}
 
     return `- Coordinates: X: ${x}, Y: ${y}, Z: ${z}
 - Current Dimension: ${dim}
@@ -153,9 +263,9 @@ export class BotManager extends EventEmitter {
 - Nearby Players: ${nearby}
 - Minecraft Version: ${version}
 - World Seed: ${seed}
-- Master Player: Phyroosh`;
+- State: ${this.state}
+- Trusted Player: ${this.trustedPlayer}`;
   }
-
 
   getStatus() {
     let position = null;
@@ -179,7 +289,6 @@ export class BotManager extends EventEmitter {
       health = Math.round(this.bot.health ?? 20);
       food = Math.round(this.bot.food ?? 20);
 
-      // Experience
       if (this.bot.experience) {
         experience = {
           level: this.bot.experience.level ?? 0,
@@ -188,12 +297,10 @@ export class BotManager extends EventEmitter {
         };
       }
 
-      // Weather
       if (this.bot.thunderState > 0) weather = 'Thunder ⛈️';
       else if (this.bot.isRaining) weather = 'Rain 🌧️';
       else weather = 'Clear ☀️';
 
-      // Time of day
       if (this.bot.time) {
         const t = this.bot.time.timeOfDay;
         if (t >= 0 && t < 6000) timeOfDay = 'Morning 🌅';
@@ -203,7 +310,6 @@ export class BotManager extends EventEmitter {
         else timeOfDay = 'Dawn 🌄';
       }
 
-      // Game info
       if (this.bot.game) {
         gameMode = this.bot.game.gameMode ?? 'Unknown';
         dimension = this.bot.game.dimension ?? 'Unknown';
@@ -217,6 +323,10 @@ export class BotManager extends EventEmitter {
       state: this.state,
       server: this.currentServer,
       username: this.bot?.username || this.currentServer?.username || this.settings.defaultUsername,
+      trustedPlayer: this.trustedPlayer,
+      farmLocation: this.farmLocation,
+      reconnectAttempts: this.reconnectAttempts,
+      maxReconnectAttempts: this.maxReconnectAttempts,
       health,
       food,
       position,
@@ -224,7 +334,6 @@ export class BotManager extends EventEmitter {
       antiAfkEnabled: this.settings.antiAfkEnabled,
       aiActive: !!this.aiChat.apiKey,
       settings: this.settings,
-      // New expanded fields
       experience,
       weather,
       timeOfDay,
@@ -236,7 +345,7 @@ export class BotManager extends EventEmitter {
       worldSeed: this.settings.worldSeed || '',
       onlinePlayers: this.getOnlinePlayers(),
       inventory: this.getInventory(),
-      isReconnecting: !!this.reconnectTimer
+      isReconnecting: this.state === STATES.RECONNECTING || !!this.reconnectTimer
     };
   }
 
@@ -250,14 +359,12 @@ export class BotManager extends EventEmitter {
       slot: item.slot
     }));
 
-    // Armor slots
     const slots = this.bot.inventory.slots;
     const armorSlot = (idx) => {
       const s = slots[idx];
       return s ? { name: s.name, displayName: s.displayName || s.name, count: s.count } : null;
     };
 
-    // Standard player inventory armor slot indices: head=5, chest=6, legs=7, feet=8 in mineflayer
     const armor = {
       helmet: armorSlot(5),
       chestplate: armorSlot(6),
@@ -265,11 +372,8 @@ export class BotManager extends EventEmitter {
       boots: armorSlot(8)
     };
 
-    // Held item
     const held = this.bot.heldItem;
     const heldItem = held ? { name: held.name, displayName: held.displayName || held.name, count: held.count } : null;
-
-    // Offhand (slot 45)
     const off = slots[45];
     const offhand = off ? { name: off.name, displayName: off.displayName || off.name, count: off.count } : null;
 
@@ -289,13 +393,14 @@ export class BotManager extends EventEmitter {
 
   async connect(serverConfig) {
     this.clearWatchdog();
-    if (this.state === 'CONNECTING' || this.state === 'CONNECTED' || this.state === 'SPAWNED') {
-      this.disconnect();
-      await new Promise(r => setTimeout(r, 1200));
+    this.clearTpaTimeout();
+
+    if (this.hasSpawned() || this.state === STATES.CONNECTING) {
+      this.cleanup(false);
+      await new Promise(r => setTimeout(r, 800));
     }
 
     this.manualDisconnect = false;
-    this.clearWatchdog();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -308,18 +413,23 @@ export class BotManager extends EventEmitter {
     const autoLogin = serverConfig.autoLogin !== undefined ? serverConfig.autoLogin : this.settings.autoLogin;
     const version = serverConfig.version ? serverConfig.version.trim() : false;
 
+    if (!host) {
+      this.transitionTo(STATES.ERROR, 'Server host is required');
+      this.emit('log', { type: 'error', text: '[ERROR] Cannot connect: Server host is missing.' });
+      return;
+    }
+
+    this.transitionTo(STATES.INITIALIZING, 'Preparing connection');
+
     let targetIp = null;
     const originalDomain = host;
 
-    // Check if port is default 25565 and host is a domain (e.g. hyrixsmp3.aternos.me).
-    // Cloud environments (Render, AWS, Docker) often fail to resolve SRV records or have DNS lookup latency.
-    // We resolve SRV records and IPv4 explicitly using Google (8.8.8.8) and Cloudflare (1.1.1.1) DNS!
+    // DNS & SRV Resolution
     if (net.isIP(host) === 0 && host !== 'localhost') {
       try {
         const resolver = new dns.promises.Resolver();
         resolver.setServers(['8.8.8.8', '1.1.1.1']);
 
-        // 1. Resolve SRV for dynamic port
         if (port === 25565) {
           try {
             const srvRecords = await resolver.resolveSrv(`_minecraft._tcp.${host}`);
@@ -330,24 +440,16 @@ export class BotManager extends EventEmitter {
               }
               this.emit('log', { type: 'system', text: `Resolved dynamic port via Public DNS: ${port}` });
             }
-          } catch (e) {
-            // no SRV record
-          }
+          } catch (e) {}
         }
 
-        // 2. Resolve IPv4 directly so the socket never gets stuck on Render's container DNS
         try {
           const ips = await resolver.resolve4(host);
           if (ips && ips.length > 0) {
             targetIp = ips[0];
-            this.emit('log', { type: 'system', text: `Resolved direct server IP: ${targetIp}` });
           }
-        } catch (e) {
-          // fallback
-        }
-      } catch (err) {
-        // DNS lookup failed
-      }
+        } catch (e) {}
+      } catch (err) {}
     }
 
     this.currentServer = {
@@ -360,12 +462,9 @@ export class BotManager extends EventEmitter {
       version: version || 'auto'
     };
 
-    // Save to storage
     this.storage.saveServer(this.currentServer);
 
-    this.state = 'CONNECTING';
-    this.emit('status', this.getStatus());
-    this.emit('log', { type: 'system', text: `Connecting to ${targetIp || host}:${port} as ${username} (offline/cracked mode)...` });
+    this.transitionTo(STATES.CONNECTING, `Connecting to ${targetIp || host}:${port}`);
 
     const botOptions = {
       host: targetIp || host,
@@ -374,7 +473,7 @@ export class BotManager extends EventEmitter {
       username,
       auth: 'offline',
       skipValidation: true,
-      checkTimeoutInterval: 120000
+      checkTimeoutInterval: 90000
     };
 
     if (version && version !== 'auto') {
@@ -385,11 +484,11 @@ export class BotManager extends EventEmitter {
       this.clearWatchdog();
       const currentBot = mineflayer.createBot(botOptions);
       this.bot = currentBot;
-      
-      // Connection watchdog: give up to 90 seconds for autoVersion ping + TCP handshake
+
+      // 90s connection watchdog
       this.connectionWatchdog = setTimeout(() => {
-        if (this.state === 'CONNECTING' && this.bot === currentBot) {
-          this.emit('log', { type: 'warn', text: 'Server handshake timed out after 90s. Retrying connection...' });
+        if (this.state === STATES.CONNECTING && this.bot === currentBot) {
+          this.emit('log', { type: 'warn', text: '[CONNECT] Handshake timed out after 90s. Retrying connection...' });
           this.handleBotError(new Error('Connection handshake timed out after 90s'));
         }
       }, 90000);
@@ -409,13 +508,10 @@ export class BotManager extends EventEmitter {
 
       if (currentBot._client) {
         currentBot._client.once('connect', () => {
-          this.emit('log', { type: 'system', text: 'TCP socket connection established!' });
+          this.emit('log', { type: 'system', text: '[CONNECT] TCP socket connection established.' });
         });
         currentBot._client.on('error', (err) => {
           this.emit('log', { type: 'error', text: `Client network error: ${err.message}` });
-        });
-        currentBot._client.on('state', (newState) => {
-          this.emit('log', { type: 'system', text: `Protocol state: ${newState}` });
         });
       }
 
@@ -430,13 +526,11 @@ export class BotManager extends EventEmitter {
     if (!rawSender) return { username: 'Unknown', team: null };
     const clean = String(rawSender).replace(/§./g, '').trim();
 
-    // Pattern 1: [team] username or [team]username
     const bracketMatch = clean.match(/^\[([^\]]+)\]\s*([a-zA-Z0-9_]{3,16})$/i);
     if (bracketMatch) {
       return { team: bracketMatch[1].trim(), username: bracketMatch[2].trim() };
     }
 
-    // Pattern 2: team username (space separated)
     const spaceMatch = clean.match(/^([a-zA-Z0-9_]+)\s+([a-zA-Z0-9_]{3,16})$/i);
     if (spaceMatch) {
       const secondWord = spaceMatch[2].trim();
@@ -445,24 +539,10 @@ export class BotManager extends EventEmitter {
       }
     }
 
-    // Pattern 3: direct match with online player
     if (this.bot && this.bot.players) {
       const directPlayer = Object.values(this.bot.players).find(p => p.username.toLowerCase() === clean.toLowerCase());
       if (directPlayer) {
         return { username: directPlayer.username, team: directPlayer.team || null };
-      }
-    }
-
-    // Pattern 4: If clean is literally a team name ('harshu' or matching Phyroosh's team),
-    // attribute to permanent owner Phyroosh
-    if (clean.toLowerCase() === 'harshu') {
-      return { username: 'Phyroosh', team: 'harshu' };
-    }
-
-    if (this.bot && this.bot.players) {
-      const phyroosh = Object.values(this.bot.players).find(p => p.username.toLowerCase() === 'phyroosh');
-      if (phyroosh && phyroosh.team && phyroosh.team.toLowerCase() === clean.toLowerCase()) {
-        return { username: 'Phyroosh', team: clean };
       }
     }
 
@@ -473,26 +553,21 @@ export class BotManager extends EventEmitter {
     if (!text) return null;
     const clean = String(text).replace(/§./g, '').trim();
 
-    // Pattern 1: [harshu] Phyroosh whispers to you: message OR Phyroosh whispers to you: message
-    // Also whispers:, tells you:, whispered to you:
     const p1 = clean.match(/^(?:\[([^\]]+)\]\s*)?([a-zA-Z0-9_]{3,16})\s+(?:whispers to you|whispers|tells you|whispered to you):\s*(.*)$/i);
     if (p1) {
       return { team: p1[1] || null, sender: p1[2], message: p1[3] };
     }
 
-    // Pattern 2: [Phyroosh -> you] message OR [harshu] [Phyroosh -> you] message OR [Phyroosh -> me]
     const p2 = clean.match(/^(?:\[([^\]]+)\]\s*)?\[\s*([a-zA-Z0-9_]{3,16})\s*->\s*(?:you|me)\s*\]\s*(.*)$/i);
     if (p2) {
       return { team: p2[1] || null, sender: p2[2], message: p2[3] };
     }
 
-    // Pattern 3: From Phyroosh: message OR [From Phyroosh] message OR [harshu] From Phyroosh: message
     const p3 = clean.match(/^(?:\[([^\]]+)\]\s*)?(?:\[\s*From\s+([a-zA-Z0-9_]{3,16})\s*\]|From\s+([a-zA-Z0-9_]{3,16}):)\s*(.*)$/i);
     if (p3) {
       return { team: p3[1] || null, sender: p3[2] || p3[3], message: p3[4] };
     }
 
-    // Pattern 4: Phyroosh -> you: message or Phyroosh » you: message
     const p4 = clean.match(/^(?:\[([^\]]+)\]\s*)?([a-zA-Z0-9_]{3,16})\s*(?:->|»)\s*(?:you|me):\s*(.*)$/i);
     if (p4) {
       return { team: p4[1] || null, sender: p4[2], message: p4[3] };
@@ -501,10 +576,168 @@ export class BotManager extends EventEmitter {
     return null;
   }
 
+  /**
+   * Deterministic TPA detection from server message
+   */
+  detectTpaRequest(rawText) {
+    if (!rawText || typeof rawText !== 'string') return null;
+    const clean = rawText.replace(/§./g, '').trim();
+
+    // 1. "<Player> has requested to teleport to you" or "has requested that you teleport"
+    const m1 = clean.match(/([a-zA-Z0-9_]{3,16})\s+(?:has requested to teleport|has requested that you teleport|wants to teleport to you|requested to teleport|has asked to teleport)/i);
+    if (m1) {
+      const cmdMatch = clean.match(/\/(tpaccept(?:\s+[a-zA-Z0-9_]{3,16})?|tpyes)/i);
+      return {
+        sender: m1[1].trim(),
+        acceptCommand: cmdMatch ? `/${cmdMatch[1].trim()}` : '/tpaccept',
+        raw: clean
+      };
+    }
+
+    // 2. "[TPA] <Player> sent a teleport request" or "TPA from <Player>"
+    const m2 = clean.match(/(?:\[TPA\]|TPA:|\bTPA\b)\s*(?:request\s+from\s+)?([a-zA-Z0-9_]{3,16})/i);
+    if (m2) {
+      const candidate = m2[1].trim();
+      if (!['request', 'from', 'to', 'you', 'type', 'accept'].includes(candidate.toLowerCase())) {
+        const cmdMatch = clean.match(/\/(tpaccept(?:\s+[a-zA-Z0-9_]{3,16})?|tpyes)/i);
+        return {
+          sender: candidate,
+          acceptCommand: cmdMatch ? `/${cmdMatch[1].trim()}` : '/tpaccept',
+          raw: clean
+        };
+      }
+    }
+
+    // 3. "Teleport request received from <Player>"
+    const m3 = clean.match(/teleport request (?:received from|from)\s+([a-zA-Z0-9_]{3,16})/i);
+    if (m3) {
+      const cmdMatch = clean.match(/\/(tpaccept(?:\s+[a-zA-Z0-9_]{3,16})?|tpyes)/i);
+      return {
+        sender: m3[1].trim(),
+        acceptCommand: cmdMatch ? `/${cmdMatch[1].trim()}` : '/tpaccept',
+        raw: clean
+      };
+    }
+
+    // 4. "To accept, type /tpaccept" or "Type /tpaccept to accept"
+    if (clean.includes('/tpaccept') || clean.includes('/tpyes')) {
+      const cmdMatch = clean.match(/\/(tpaccept(?:\s+[a-zA-Z0-9_]{3,16})?|tpyes)/i);
+      if (cmdMatch) {
+        return {
+          sender: null,
+          acceptCommand: `/${cmdMatch[1].trim()}`,
+          raw: clean
+        };
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Accepts incoming TPA request, records position, and enters verification
+   */
+  async acceptTpaRequest(acceptCommand = '/tpaccept', requester = '') {
+    if (this.state !== STATES.WAITING_FOR_TPA && this.state !== STATES.AFK) {
+      return;
+    }
+    if (!this.bot) return;
+
+    this.transitionTo(STATES.ACCEPTING_TPA, `Accepting request from ${requester}`);
+
+    // Snapshot pre-teleport coordinates & dimension
+    if (this.bot.entity && this.bot.entity.position) {
+      this.preTeleportPos = this.bot.entity.position.clone();
+      this.preTeleportDim = this.bot.game?.dimension || 'Overworld';
+    } else {
+      this.preTeleportPos = null;
+      this.preTeleportDim = null;
+    }
+
+    // Small delay before command to avoid server packet drop
+    await new Promise(r => setTimeout(r, 450));
+    if (!this.bot || (this.state !== STATES.ACCEPTING_TPA && this.state !== STATES.VERIFYING_TELEPORT)) return;
+
+    const finalCmd = acceptCommand.startsWith('/') ? acceptCommand : `/${acceptCommand}`;
+    this.bot.chat(finalCmd);
+
+    this.transitionTo(STATES.VERIFYING_TELEPORT, `Sent ${finalCmd}`);
+
+    this.clearTpaTimeout();
+    const timeoutSec = this.settings.tpaTimeoutSec || 25;
+    this.tpaTimeoutTimer = setTimeout(async () => {
+      if (this.state === STATES.VERIFYING_TELEPORT) {
+        await this.handleTeleportTimeout();
+      }
+    }, timeoutSec * 1000);
+  }
+
+  /**
+   * Confirms teleport destination and enters AFK mode
+   */
+  confirmTeleport(reason = '') {
+    if (this.state !== STATES.VERIFYING_TELEPORT) return;
+
+    this.clearTpaTimeout();
+
+    // Snapshot final farm location
+    if (this.bot && this.bot.entity && this.bot.entity.position) {
+      this.farmLocation = {
+        x: Math.round(this.bot.entity.position.x * 10) / 10,
+        y: Math.round(this.bot.entity.position.y * 10) / 10,
+        z: Math.round(this.bot.entity.position.z * 10) / 10,
+        dimension: this.bot.game?.dimension || 'Overworld'
+      };
+    }
+
+    // Clear all control states so bot remains completely still
+    if (this.bot) {
+      try {
+        this.bot.clearControlStates();
+      } catch (e) {}
+    }
+
+    this.transitionTo(STATES.AFK, reason || 'Teleport verified');
+  }
+
+  /**
+   * Handles teleport verification timeout
+   */
+  async handleTeleportTimeout() {
+    this.clearTpaTimeout();
+    this.emit('log', {
+      type: 'warn',
+      text: `[TPA] Teleport verification timed out after ${this.settings.tpaTimeoutSec || 25}s without position change.`
+    });
+
+    if (this.aiChat?.apiKey) {
+      try {
+        const diag = await this.aiChat.diagnoseDisconnection(
+          'Teleport verification timed out without movement confirmation',
+          this.recentChatLog
+        );
+        if (diag && diag.explanation) {
+          this.emit('log', { type: 'system', text: `[Diagnostics] ${diag.explanation}` });
+        }
+      } catch (e) {}
+    }
+
+    // Return to WAITING_FOR_TPA so trusted player can send another request
+    this.transitionTo(STATES.WAITING_FOR_TPA, 'Teleport verification timed out');
+  }
+
+  /**
+   * Handles teleport cancellation or failure reported by server
+   */
+  handleTeleportFailure(reason) {
+    this.clearTpaTimeout();
+    this.emit('log', { type: 'warn', text: `[TPA] ${reason}` });
+    this.transitionTo(STATES.WAITING_FOR_TPA, reason);
+  }
+
   setupBotEvents(loginPassword, autoLogin) {
     const bot = this.bot;
 
-    // Helper to recursively extract text from NBT or JSON chat components
     const extractText = (obj) => {
       if (obj === null || obj === undefined) return '';
       if (typeof obj === 'string') {
@@ -530,7 +763,7 @@ export class BotManager extends EventEmitter {
       return result || '';
     };
 
-    // Smart Auto-Auth State (Login & 2x Password Registration)
+    // Smart Auto-Auth State
     let authCompleted = false;
     let lastAuthCommand = null;
     let lastAuthTime = 0;
@@ -550,7 +783,7 @@ export class BotManager extends EventEmitter {
         return;
       }
 
-      if (this.state !== 'SPAWNED') {
+      if (!this.hasSpawned()) {
         pendingAuth = { commandType, reason };
         return;
       }
@@ -560,14 +793,13 @@ export class BotManager extends EventEmitter {
       lastAuthTime = now;
 
       setTimeout(() => {
-        if (!this.bot || this.state !== 'SPAWNED') return;
+        if (!this.bot || !this.hasSpawned()) return;
 
         if (commandType === 'register') {
           this.emit('log', { 
             type: 'system', 
             text: `[Auto-Auth] Registering account (${reason}): /register ******* *******` 
           });
-          // Password entered 2 times as required by AuthMe / LoginSecurity / PinGUI
           this.bot.chat(`/register ${loginPassword} ${loginPassword}`);
         } else if (commandType === 'login') {
           this.emit('log', { 
@@ -587,7 +819,6 @@ export class BotManager extends EventEmitter {
       const lower = clean.toLowerCase();
       if (!lower) return;
 
-      // 1. Success verification
       if (
         lower.includes('successful login') ||
         lower.includes('successfully logged in') ||
@@ -606,7 +837,6 @@ export class BotManager extends EventEmitter {
         return;
       }
 
-      // 2. Registration triggers
       const isRegisterPrompt =
         lower.includes('/register') ||
         lower.includes('/reg ') ||
@@ -627,7 +857,6 @@ export class BotManager extends EventEmitter {
         lower.includes('confirm password') ||
         (lower.includes('register') && lower.includes('password'));
 
-      // 3. Login triggers
       const isLoginPrompt =
         lower.includes('/login') ||
         lower.includes('/l ') ||
@@ -641,13 +870,11 @@ export class BotManager extends EventEmitter {
         lower.includes('enter your password to continue') ||
         (lower.includes('login') && lower.includes('password'));
 
-      // Correction: If we tried to register, but account is already registered -> switch to login!
       if (lastAuthCommand === 'register' && (lower.includes('already registered') || lower.includes('username taken') || lower.includes('use /login') || lower.includes('please login'))) {
         executeAuth('login', 'Switched to login: account is already registered');
         return;
       }
 
-      // Correction: If we tried to login, but account is NOT registered -> switch to register!
       if (lastAuthCommand === 'login' && (lower.includes('not registered') || lower.includes('please register') || lower.includes('use /register') || lower.includes('unregistered') || lower.includes('register first') || lower.includes('must register'))) {
         executeAuth('register', 'Switched to register: account not registered yet');
         return;
@@ -660,8 +887,87 @@ export class BotManager extends EventEmitter {
       }
     };
 
+    /**
+     * Unified message pipeline for chat, whispers, system messages, and titles
+     */
+    const handleIncomingMessage = async (cleanText, source = 'CHAT', senderCandidate = null) => {
+      if (!cleanText || typeof cleanText !== 'string') return;
+      const clean = cleanText.replace(/§./g, '').trim();
+      if (!clean) return;
+
+      checkAuthPrompt(clean, source);
+
+      // Check teleport completion or cancellation during verification
+      if (this.state === STATES.VERIFYING_TELEPORT) {
+        const lower = clean.toLowerCase();
+        if (
+          lower.includes('teleport complete') ||
+          lower.includes('teleportation complete') ||
+          lower.includes('teleported to') ||
+          lower.includes('teleporting in') ||
+          lower.includes('teleportation commencing') ||
+          lower.includes('request accepted') ||
+          lower.includes('teleport accepted')
+        ) {
+          this.confirmTeleport(`Server message confirmation: "${clean}"`);
+          return;
+        }
+
+        if (
+          lower.includes('teleport cancelled') ||
+          lower.includes('request timed out') ||
+          lower.includes('request expired') ||
+          lower.includes('teleport failed')
+        ) {
+          this.handleTeleportFailure(`Server reported: "${clean}"`);
+          return;
+        }
+      }
+
+      // Check TPA requests when in WAITING_FOR_TPA or AFK
+      if (this.state === STATES.WAITING_FOR_TPA || this.state === STATES.AFK) {
+        let tpa = this.detectTpaRequest(clean);
+
+        // Fallback to LLM interpreter if message mentions teleport/tpa but regex is ambiguous
+        if (!tpa && (clean.toLowerCase().includes('teleport') || clean.toLowerCase().includes('tpa'))) {
+          try {
+            const aiInterp = await this.aiChat.interpretTeleportMessage(clean, this.recentChatLog);
+            if (aiInterp && aiInterp.isTpaRequest) {
+              tpa = {
+                sender: aiInterp.sender,
+                acceptCommand: aiInterp.acceptCommand || '/tpaccept',
+                raw: clean
+              };
+            }
+          } catch (e) {}
+        }
+
+        if (tpa) {
+          let sender = tpa.sender || senderCandidate;
+          if (!sender && this.lastTeleportRequester) {
+            sender = this.lastTeleportRequester;
+          }
+
+          if (sender) {
+            this.lastTeleportRequester = sender;
+            const isTrusted = sender.trim().toLowerCase() === this.trustedPlayer.toLowerCase();
+
+            if (isTrusted) {
+              await this.acceptTpaRequest(tpa.acceptCommand || '/tpaccept', sender);
+            } else {
+              this.emit('log', {
+                type: 'warn',
+                text: `[TPA] Ignored teleport request from untrusted player: ${sender}`
+              });
+            }
+          } else if (this.lastTeleportRequester && this.lastTeleportRequester.toLowerCase() === this.trustedPlayer.toLowerCase()) {
+            await this.acceptTpaRequest(tpa.acceptCommand || '/tpaccept', this.lastTeleportRequester);
+          }
+        }
+      }
+    };
+
     if (bot._client) {
-      // Low-level packet interception to fix Paper/offline mode sender usernames
       bot._client.on('packet', (data, meta) => {
         let sender = null;
         let message = null;
@@ -698,14 +1004,13 @@ export class BotManager extends EventEmitter {
           } else if (meta.name === 'set_title_text' || meta.name === 'set_subtitle_text' || meta.name === 'set_action_bar_text' || meta.name === 'title') {
             const titleText = extractText(data.text || data.content || data.value);
             if (titleText) {
-              checkAuthPrompt(titleText, 'TITLE');
+              handleIncomingMessage(titleText, 'TITLE');
             }
           } else if (meta.name === 'system_chat') {
             message = extractText(data.content || data.formattedMessage);
             if (message) {
               const cleanMsg = message.replace(/§./g, '').trim();
               if (cleanMsg) {
-                // Check if this system_chat is actually a private whisper from a player!
                 const whisperData = this.parseWhisper(cleanMsg);
                 if (whisperData) {
                   const identity = this.resolvePlayerAndTeam(whisperData.sender);
@@ -714,6 +1019,7 @@ export class BotManager extends EventEmitter {
                   const displayTag = `[Whisper] ${resolvedTeam && resolvedUsername.toLowerCase() !== resolvedTeam.toLowerCase() ? `[${resolvedTeam}] ` : ''}${resolvedUsername}`;
                   if (this.emitChat(displayTag, whisperData.message)) {
                     this.addChatToRecentLog(displayTag, whisperData.message);
+                    handleIncomingMessage(whisperData.message, 'WHISPER', resolvedUsername);
                     this.handlePotentialAiChat(resolvedUsername, whisperData.message, resolvedTeam, true);
                   }
                   return;
@@ -722,16 +1028,12 @@ export class BotManager extends EventEmitter {
                 const sysLabel = data.isActionBar ? 'ACTIONBAR' : 'SERVER';
                 if (this.emitChat(sysLabel, cleanMsg)) {
                   this.addChatToRecentLog(sysLabel, cleanMsg);
-                  if (cleanMsg.toLowerCase().includes('has requested to teleport') || cleanMsg.toLowerCase().includes('teleport request')) {
-                    this.emit('log', { type: 'system', text: `[Notice] Incoming teleport request detected on server!` });
-                  }
-                  checkAuthPrompt(cleanMsg, sysLabel);
+                  handleIncomingMessage(cleanMsg, sysLabel);
                 }
               }
             }
             return;
           } else if (meta.name === 'chat') {
-            // Older versions <= 1.18
             message = extractText(data.message);
             if (message) {
               const cleanMsg = message.replace(/§./g, '').trim();
@@ -743,6 +1045,7 @@ export class BotManager extends EventEmitter {
                 const displayTag = `[Whisper] ${resolvedTeam && resolvedUsername.toLowerCase() !== resolvedTeam.toLowerCase() ? `[${resolvedTeam}] ` : ''}${resolvedUsername}`;
                 if (this.emitChat(displayTag, whisperData.message)) {
                   this.addChatToRecentLog(displayTag, whisperData.message);
+                  handleIncomingMessage(whisperData.message, 'WHISPER', resolvedUsername);
                   this.handlePotentialAiChat(resolvedUsername, whisperData.message, resolvedTeam, true);
                 }
                 return;
@@ -753,23 +1056,18 @@ export class BotManager extends EventEmitter {
                 sender = parsed.sender;
                 message = parsed.message;
               } else {
-                // System message fallback
                 if (this.emitChat('SERVER', cleanMsg)) {
                   this.addChatToRecentLog('SERVER', cleanMsg);
-                  if (cleanMsg.toLowerCase().includes('has requested to teleport') || cleanMsg.toLowerCase().includes('teleport request')) {
-                    this.emit('log', { type: 'system', text: `[Notice] Incoming teleport request detected on server!` });
-                  }
-                  checkAuthPrompt(cleanMsg, 'SERVER');
+                  handleIncomingMessage(cleanMsg, 'SERVER');
                 }
                 return;
               }
             }
           }
         } catch (e) {
-          console.error("Error parsing packet:", meta.name, e);
+          console.error('Error parsing packet:', meta.name, e);
         }
 
-        // Final authority: if packet has senderUuid, resolve to exact player
         if (data && data.senderUuid) {
           if (data.senderUuid === '5f0f0818-ef23-3ade-ae93-571e53719fb6') {
             sender = 'Phyroosh';
@@ -783,19 +1081,17 @@ export class BotManager extends EventEmitter {
 
         if (sender && message && typeof message === 'string' && message.trim()) {
           const cleanMsg = message.replace(/§./g, '').trim();
-          
-          // Dissect sender into real player username vs team prefix
           const identity = this.resolvePlayerAndTeam(sender);
           const resolvedUsername = identity.username;
           const resolvedTeam = identity.team;
 
-          // For the UI chat tag, show [team] username if team exists, or username
           const displayTag = resolvedTeam && resolvedUsername.toLowerCase() !== resolvedTeam.toLowerCase()
             ? `[${resolvedTeam}] ${resolvedUsername}`
             : resolvedUsername;
 
           if (this.emitChat(displayTag, cleanMsg)) {
             this.addChatToRecentLog(displayTag, cleanMsg);
+            handleIncomingMessage(cleanMsg, 'CHAT', resolvedUsername);
             this.handlePotentialAiChat(resolvedUsername, cleanMsg, resolvedTeam, isWhisper);
           }
         }
@@ -808,6 +1104,7 @@ export class BotManager extends EventEmitter {
       const cleanMsg = String(msg).replace(/§./g, '').trim();
       if (this.emitChat(displayTag, cleanMsg)) {
         this.addChatToRecentLog(displayTag, cleanMsg);
+        handleIncomingMessage(cleanMsg, 'WHISPER', identity.username);
         this.handlePotentialAiChat(identity.username, cleanMsg, identity.team, true);
       }
     });
@@ -815,7 +1112,7 @@ export class BotManager extends EventEmitter {
     bot.on('messagestr', (msg) => {
       if (!msg) return;
       const cleanMsg = String(msg).replace(/§./g, '').trim();
-      checkAuthPrompt(cleanMsg, 'CHAT');
+      handleIncomingMessage(cleanMsg, 'MESSAGESTR');
       const whisperData = this.parseWhisper(cleanMsg);
       if (whisperData) {
         const identity = this.resolvePlayerAndTeam(whisperData.sender);
@@ -833,21 +1130,6 @@ export class BotManager extends EventEmitter {
       const title = extractText(window.title || '').replace(/§./g, '').trim();
       this.emit('log', { type: 'system', text: `[Server GUI] Window opened: "${title}" (id: ${window.id}, type: ${window.type})` });
       checkAuthPrompt(title, 'WINDOW');
-
-      // Auto-click Grass Block if Server Selector GUI opens
-      const lower = title.toLowerCase();
-      if (lower.includes('selector') || lower.includes('hyrix') || lower.includes('select server') || lower.includes('smp')) {
-        this.emit('log', { type: 'system', text: '[Auto-Selector] Server Selector menu detected! Auto-clicking Grass Block...' });
-        setTimeout(() => {
-          this.clickGrassInWindow(window);
-        }, 500);
-      }
-    });
-
-    bot.on('connect', () => {
-      this.state = 'CONNECTED';
-      this.emit('status', this.getStatus());
-      this.emit('log', { type: 'system', text: 'Connected to server! Handshaking...' });
     });
 
     bot.on('login', () => {
@@ -855,41 +1137,28 @@ export class BotManager extends EventEmitter {
     });
 
     bot.on('spawn', () => {
-      this.state = 'SPAWNED';
       this.spawnTime = Date.now();
-      this.emit('status', this.getStatus());
-      this.emit('log', { type: 'system', text: 'Bot spawned into the Minecraft world!' });
+      this.reconnectAttempts = 0; // Reset reconnection counter upon successful join
 
-      if (this.aiChat.apiKey) {
-        const guests = (this.settings.permittedUsers || []).filter(u => u && u.toLowerCase() !== 'phyroosh');
-        const userSummary = guests.length > 0 ? `Phyroosh (Owner) + [${guests.join(', ')}]` : `Phyroosh (Owner)`;
-        this.emit('log', { type: 'system', text: `🤖 Chat-Aware AI active: Ready for natural conversation and orders from ${userSummary} (GPT/Dream)!` });
-      }
+      this.transitionTo(STATES.JOINED, 'Bot spawned in world');
 
       if (pendingAuth) {
         executeAuth(pendingAuth.commandType, pendingAuth.reason);
         pendingAuth = null;
       } else if (autoLogin && loginPassword && !authCompleted) {
         setTimeout(() => {
-          if (this.state === 'SPAWNED' && this.bot && !authCompleted && authAttempts === 0) {
+          if (this.state === STATES.JOINED && this.bot && !authCompleted && authAttempts === 0) {
             executeAuth('login', 'Default initial spawn login');
           }
         }, 1500);
       }
 
-      // Auto-Lobby Selector: If in lobby (Nether Star in hotbar), auto-trigger selector
-      if (this.settings.autoJoinSmp !== false) {
-        setTimeout(() => {
-          if (this.state === 'SPAWNED' && this.bot && this.hasLobbyItem()) {
-            this.emit('log', { type: 'system', text: '[Auto-Selector] Detected Lobby Star in hand! Auto-selecting SMP in 2.5s...' });
-            setTimeout(() => {
-              if (this.state === 'SPAWNED' && this.bot) {
-                this.performLobbySelection();
-              }
-            }, 2500);
-          }
-        }, 3000);
-      }
+      // Transition from JOINED to WAITING_FOR_TPA after initial join stabilization
+      setTimeout(() => {
+        if (this.state === STATES.JOINED && this.bot) {
+          this.transitionTo(STATES.WAITING_FOR_TPA, 'Ready to receive teleport request');
+        }
+      }, 2000);
 
       this.resetAntiAfkTimer();
     });
@@ -900,7 +1169,16 @@ export class BotManager extends EventEmitter {
     });
 
     bot.on('move', () => {
-      // Throttle status updates for position to avoid spam
+      // Teleport verification check: verify movement displacement > 2.0 blocks
+      if (this.state === STATES.VERIFYING_TELEPORT && this.preTeleportPos && this.bot?.entity?.position) {
+        const dist = this.bot.entity.position.distanceTo(this.preTeleportPos);
+        const currentDim = this.bot.game?.dimension;
+        if (dist > 2.0 || (this.preTeleportDim && currentDim && currentDim !== this.preTeleportDim)) {
+          this.confirmTeleport(`Position shifted by ${dist.toFixed(1)} blocks`);
+          return;
+        }
+      }
+
       const now = Date.now();
       if (!this._lastMoveStatus || now - this._lastMoveStatus > 1000) {
         this.emit('status', this.getStatus());
@@ -916,18 +1194,10 @@ export class BotManager extends EventEmitter {
       }
     });
 
-    bot.on('rain', () => {
-      this.emit('status', this.getStatus());
-    });
+    bot.on('rain', () => this.emit('status', this.getStatus()));
+    bot.on('experience', () => this.emit('status', this.getStatus()));
 
-    bot.on('experience', () => {
-      this.emit('status', this.getStatus());
-    });
-
-    const updatePlayers = () => {
-      this.emit('status', this.getStatus());
-    };
-
+    const updatePlayers = () => this.emit('status', this.getStatus());
     bot.on('playerJoined', updatePlayers);
     bot.on('playerLeft', updatePlayers);
 
@@ -943,14 +1213,11 @@ export class BotManager extends EventEmitter {
       if (bot.inventory && typeof bot.inventory.on === 'function') {
         try {
           bot.inventory.on('updateSlot', updateInventory);
-        } catch (e) {
-          // ignore
-        }
+        } catch (e) {}
       }
     };
     hookInventory();
     bot.on('spawn', hookInventory);
-
 
     bot.on('kicked', (reason) => {
       let kickReason = 'Unknown reason';
@@ -959,13 +1226,25 @@ export class BotManager extends EventEmitter {
       } catch (e) {
         kickReason = String(reason);
       }
-      this.emit('log', { type: 'warn', text: `Bot was kicked: ${kickReason}` });
+
+      if (this.state === STATES.AFK) {
+        this.emit('log', { type: 'warn', text: `[AFK] Connection lost (kicked: ${kickReason}). Preparing recovery...` });
+      } else {
+        this.emit('log', { type: 'warn', text: `[CONNECT] Bot was kicked: ${kickReason}` });
+      }
+
       this.cleanup(false);
       this.scheduleReconnect();
     });
 
     bot.on('end', (reason) => {
-      this.emit('log', { type: 'warn', text: `Connection ended: ${reason || 'Connection closed'}` });
+      const endReason = reason || 'Connection closed';
+      if (this.state === STATES.AFK) {
+        this.emit('log', { type: 'warn', text: `[AFK] Connection lost (${endReason}). Preparing recovery...` });
+      } else {
+        this.emit('log', { type: 'warn', text: `[CONNECT] Connection ended: ${endReason}` });
+      }
+
       this.cleanup(false);
       this.scheduleReconnect();
     });
@@ -976,11 +1255,11 @@ export class BotManager extends EventEmitter {
   }
 
   async handlePotentialAiChat(sender, message, team = null, isWhisper = false) {
-    if (this.state !== 'SPAWNED' || !this.bot) return;
+    if (!this.hasSpawned() || !this.bot) return;
 
     const lowerSender = sender.toLowerCase().trim();
-    const isOwner = lowerSender === 'phyroosh' || lowerSender.includes('phyroosh') || 'phyroosh'.includes(lowerSender);
-    const guestUsers = (this.settings.permittedUsers || []).filter(u => u && u.toLowerCase() !== 'phyroosh');
+    const isOwner = lowerSender === this.trustedPlayer.toLowerCase();
+    const guestUsers = (this.settings.permittedUsers || []).filter(u => u && u.toLowerCase() !== this.trustedPlayer.toLowerCase());
     const isGuest = guestUsers.some(u => {
       const p = String(u).trim().toLowerCase();
       return p === lowerSender || lowerSender.includes(p) || p.includes(lowerSender);
@@ -988,8 +1267,6 @@ export class BotManager extends EventEmitter {
     const isPermitted = isOwner || isGuest;
 
     const cleanMsg = message.trim().toLowerCase();
-    
-    // Check if the message asks to whisper or if it was received as a private message
     const asksToWhisper = cleanMsg.includes('whisper') || 
                           cleanMsg.includes('wisper') || 
                           cleanMsg.includes('/msg') || 
@@ -998,16 +1275,12 @@ export class BotManager extends EventEmitter {
                           cleanMsg.includes('private');
 
     const shouldWhisperReply = isWhisper || asksToWhisper;
-
-    // Trigger word check:
-    // In public chat, trigger words (GPT / Dream) prevent talking over other players.
-    // In a direct private whisper to the bot, the user ALREADY addressed the bot directly!
     const mentionsTriggerWord = this.aiChat.triggerWords.some(word => cleanMsg.includes(word));
     const hasTriggerWord = mentionsTriggerWord || shouldWhisperReply;
 
     if (hasTriggerWord && !isPermitted) {
       const label = team ? `"${sender}" (Team: ${team})` : `"${sender}"`;
-      this.emit('log', { type: 'system', text: `[AI Ignored] ${label} called GPT/Dream, but is not in Permitted Users list!` });
+      this.emit('log', { type: 'system', text: `[AI Ignored] ${label} called bot, but is not in Permitted Users list!` });
       return;
     }
 
@@ -1021,25 +1294,26 @@ export class BotManager extends EventEmitter {
 
     const context = this.getBotContext();
     const chatLog = this.recentChatLog.slice(-15).join('\n');
+    const actualPlayer = sender;
 
-    const actualPlayer = (sender.toLowerCase() === 'harshu' ? 'Phyroosh' : sender);
-
-    // Query LLM with verified Math Engine, live Web Search, and full chat awareness
     const result = await this.aiChat.getReply(actualPlayer, message, context, chatLog, (logEvent) => {
       this.emit('log', logEvent);
     });
-    if (result && this.state === 'SPAWNED' && this.bot) {
-      // 1. Execute any server slash commands requested by AI
+
+    if (result && this.hasSpawned() && this.bot) {
       if (result.commands && result.commands.length > 0) {
         await this.actionExecutor.executeCommands(result.commands, actualPlayer, shouldWhisperReply);
       }
 
-      // 2. Execute any physical in-game actions requested by AI
+      // In AFK mode, suppress artificial movement actions from LLM unless user explicitly ordered
       if (result.actions && result.actions.length > 0) {
-        await this.actionExecutor.executeActions(result.actions, actualPlayer);
+        if (this.state === STATES.AFK) {
+          this.emit('log', { type: 'system', text: `[AFK Protection] Retaining stillness; suppressed physical movement actions.` });
+        } else {
+          await this.actionExecutor.executeActions(result.actions, actualPlayer);
+        }
       }
 
-      // 3. Speak the completely natural, non-templated reply in Minecraft chat
       if (result.text) {
         if (shouldWhisperReply) {
           this.bot.chat(`/tell ${actualPlayer} ${result.text}`);
@@ -1056,9 +1330,9 @@ export class BotManager extends EventEmitter {
 
   handleBotError(err) {
     this.clearWatchdog();
+    this.clearTpaTimeout();
     const errorMsg = err?.message || String(err);
-    this.emit('log', { type: 'error', text: `Bot connection error: ${errorMsg}` });
-    this.state = 'ERROR';
+    this.emit('log', { type: 'error', text: `[CONNECT] Bot connection error: ${errorMsg}` });
     this.cleanup(false);
     this.scheduleReconnect();
   }
@@ -1069,94 +1343,51 @@ export class BotManager extends EventEmitter {
       this.antiAfkTimer = null;
     }
 
-    if (!this.settings.antiAfkEnabled || this.state !== 'SPAWNED') {
+    if (!this.settings.antiAfkEnabled || !this.hasSpawned()) {
       return;
     }
 
-    const baseInterval = (this.settings.antiAfkIntervalSec || 10) * 1000;
-    const jitter = (Math.random() * 0.5 - 0.25) * baseInterval;
-    const nextInterval = Math.max(3000, Math.round(baseInterval + jitter));
-
+    const intervalSec = this.settings.antiAfkIntervalSec || 30;
     this.antiAfkTimer = setTimeout(() => {
       this.performAntiAfkAction();
       this.resetAntiAfkTimer();
-    }, nextInterval);
+    }, intervalSec * 1000);
   }
 
-  async roamChamber(durationMs = 2200) {
-    if (!this.bot || this.state !== 'SPAWNED' || !this.bot.entity || this.isRoaming || this.isEating) return;
-    this.isRoaming = true;
+  /**
+   * AFK Action: Absolute Stillness in AFK Mode!
+   * No moving, jumping, looking around, or punching while in AFK.
+   */
+  async performAntiAfkAction() {
+    if (!this.bot || !this.hasSpawned() || !this.bot.entity) return;
 
-    try {
-      // Pick a random heading or turn relative to current yaw
-      const turnDelta = (Math.random() * Math.PI * 1.2) - (Math.PI * 0.6); // -108 to +108 deg
-      const newYaw = (this.bot.entity.yaw || 0) + turnDelta;
-      const newPitch = (Math.random() * 0.3) - 0.15;
-      await this.bot.look(newYaw, newPitch, true);
+    // AFK Mode: Maintain absolute stillness
+    if (this.state === STATES.AFK) {
+      try {
+        this.bot.clearControlStates();
+      } catch (e) {}
 
-      // Start moving forward
-      this.bot.setControlState('forward', true);
-
-      // Occasional sprint (30% chance)
-      if (Math.random() > 0.7) {
-        this.bot.setControlState('sprint', true);
+      // Optional safe sustenance without movement
+      if (this.settings.autoEat !== false) {
+        await this.checkAutoEat();
       }
-
-      // Small jump if jump is enabled (40% chance)
-      if (this.settings.antiAfkActions?.jump !== false && Math.random() > 0.6) {
-        this.bot.setControlState('jump', true);
-        setTimeout(() => {
-          if (this.bot) this.bot.setControlState('jump', false);
-        }, 280);
-      }
-
-      const startTime = Date.now();
-      let lastPos = this.bot.entity.position ? this.bot.entity.position.clone() : null;
-      let wallHitCount = 0;
-
-      // Monitor movement every 250ms during roam
-      while (Date.now() - startTime < durationMs) {
-        await new Promise(r => setTimeout(r, 250));
-        if (!this.bot || this.state !== 'SPAWNED' || !this.bot.entity) break;
-
-        const currentPos = this.bot.entity.position;
-        if (!currentPos || !lastPos) break;
-
-        const distMoved = currentPos.distanceTo(lastPos);
-        lastPos = currentPos.clone();
-
-        // If bot barely moved (< 0.08 blocks in 250ms), it's pressing against a wall or obstacle!
-        if (distMoved < 0.08) {
-          wallHitCount++;
-          if (wallHitCount >= 2) {
-            // Hit a wall! Turn 120-180 degrees away from the wall
-            this.bot.setControlState('forward', false);
-            this.bot.setControlState('sprint', false);
-            const bounceYaw = (this.bot.entity.yaw || 0) + Math.PI * (0.7 + Math.random() * 0.6);
-            await this.bot.look(bounceYaw, 0, true);
-            // Resume walking forward into open chamber
-            this.bot.setControlState('forward', true);
-            wallHitCount = 0;
-          }
-        } else {
-          wallHitCount = 0;
-        }
-      }
-    } catch (err) {
-      // ignore
-    } finally {
-      if (this.bot) {
-        try {
-          this.bot.setControlState('forward', false);
-          this.bot.setControlState('sprint', false);
-          this.bot.setControlState('jump', false);
-          this.bot.setControlState('back', false);
-          this.bot.setControlState('left', false);
-          this.bot.setControlState('right', false);
-        } catch (e) {}
-      }
-      this.isRoaming = false;
+      return;
     }
+
+    // Outside of AFK (e.g. testing or non-AFK states), respect configured actions
+    const actions = this.settings.antiAfkActions || {};
+    try {
+      if (actions.swingArm) {
+        this.bot.swingArm('right');
+      }
+      if (actions.lookAround) {
+        const currentYaw = this.bot.entity.yaw || 0;
+        const currentPitch = this.bot.entity.pitch || 0;
+        const newYaw = currentYaw + (Math.random() * 0.4 - 0.2);
+        const newPitch = Math.max(-1.0, Math.min(1.0, currentPitch + (Math.random() * 0.2 - 0.1)));
+        await this.bot.look(newYaw, newPitch, true);
+      }
+    } catch (e) {}
   }
 
   findBestFood() {
@@ -1190,7 +1421,6 @@ export class BotManager extends EventEmitter {
 
     if (edible.length === 0) return null;
 
-    // Prefer foods with higher nutrition / foodPoints
     edible.sort((a, b) => {
       const aPoints = this.bot.registry?.foodsByName?.[a.name]?.foodPoints ?? 4;
       const bPoints = this.bot.registry?.foodsByName?.[b.name]?.foodPoints ?? 4;
@@ -1201,7 +1431,7 @@ export class BotManager extends EventEmitter {
   }
 
   async eatFood(targetItem = null) {
-    if (!this.bot || this.state !== 'SPAWNED' || !this.bot.entity || this.isEating) return false;
+    if (!this.bot || !this.hasSpawned() || !this.bot.entity || this.isEating) return false;
     if (this.bot.food >= 20) return false;
 
     const foodItem = targetItem || this.findBestFood();
@@ -1216,10 +1446,7 @@ export class BotManager extends EventEmitter {
         text: `Auto-Eat: Low hunger (${Math.round(this.bot.food)}/20). Eating ${foodItem.name}...`
       });
 
-      // Equip food in main hand
       await this.bot.equip(foodItem, 'hand');
-
-      // Consume food item
       await this.bot.consume();
 
       this.emit('log', {
@@ -1229,9 +1456,6 @@ export class BotManager extends EventEmitter {
       this.emit('status', this.getStatus());
       return true;
     } catch (err) {
-      if (!err.message?.includes('Food is full')) {
-        this.emit('log', { type: 'warn', text: `Auto-Eat: Could not eat ${foodItem.name} (${err.message})` });
-      }
       return false;
     } finally {
       if (prevSlot !== undefined && this.bot) {
@@ -1244,7 +1468,7 @@ export class BotManager extends EventEmitter {
   }
 
   async checkAutoEat() {
-    if (!this.bot || this.state !== 'SPAWNED' || !this.bot.entity || this.isEating) return;
+    if (!this.bot || !this.hasSpawned() || !this.bot.entity || this.isEating) return;
     if (this.settings.autoEat === false) return;
 
     const threshold = this.settings.autoEatThreshold || 16;
@@ -1255,264 +1479,8 @@ export class BotManager extends EventEmitter {
     }
   }
 
-  async performAntiAfkAction() {
-    if (!this.bot || this.state !== 'SPAWNED' || !this.bot.entity) return;
-
-    // Check Auto-Eat before performing roaming or other anti-afk actions
-    await this.checkAutoEat();
-
-    const actions = this.settings.antiAfkActions || {};
-
-    try {
-      if (actions.swingArm !== false) {
-        const hand = Math.random() > 0.5 ? 'right' : 'left';
-        this.bot.swingArm(hand);
-        this.emit('log', { type: 'action', text: `Anti-AFK: Swung ${hand} hand` });
-      }
-
-      if (actions.lookAround !== false) {
-        const currentYaw = this.bot.entity.yaw || 0;
-        const currentPitch = this.bot.entity.pitch || 0;
-
-        const deltaYaw = (Math.random() * 0.8 - 0.4);
-        const deltaPitch = (Math.random() * 0.4 - 0.2);
-
-        const newYaw = currentYaw + deltaYaw;
-        const newPitch = Math.max(-1.0, Math.min(1.0, currentPitch + deltaPitch));
-
-        await this.bot.look(newYaw, newPitch, true);
-        this.emit('log', { type: 'action', text: `Anti-AFK: Shifted view angle` });
-      }
-
-      // Quickbar Slot Nudge (sends held_item_change packet to reset idle timeouts)
-      try {
-        if (this.bot.quickBarSlot !== undefined) {
-          const currentSlot = this.bot.quickBarSlot;
-          const nextSlot = (currentSlot + 1) % 9;
-          this.bot.setQuickBarSlot(nextSlot);
-          setTimeout(() => {
-            if (this.bot) this.bot.setQuickBarSlot(currentSlot);
-          }, 120);
-        }
-      } catch (e) {
-        // ignore
-      }
-
-      // Chamber Roam (Walk Around Chamber)
-      if (actions.walkAround !== false) {
-        this.emit('log', { type: 'action', text: `Anti-AFK: Roaming chamber (walking)` });
-        await this.roamChamber(2200);
-      } else if (actions.microStep) {
-        // Fallback micro-step if walkAround is explicitly disabled
-        this.bot.setControlState('sneak', true);
-        const dir = Math.random() > 0.5 ? 'forward' : 'back';
-        const oppDir = dir === 'forward' ? 'back' : 'forward';
-
-        this.bot.setControlState(dir, true);
-        setTimeout(() => {
-          if (!this.bot) return;
-          this.bot.setControlState(dir, false);
-          this.bot.setControlState(oppDir, true);
-          setTimeout(() => {
-            if (!this.bot) return;
-            this.bot.setControlState(oppDir, false);
-            this.bot.setControlState('sneak', false);
-          }, 180);
-        }, 180);
-      }
-
-      if (actions.sneak && !actions.walkAround && !actions.microStep) {
-        this.bot.setControlState('sneak', true);
-        setTimeout(() => {
-          if (this.bot) this.bot.setControlState('sneak', false);
-        }, 400);
-      }
-
-      if (actions.jump && actions.walkAround === false) {
-        this.bot.setControlState('jump', true);
-        setTimeout(() => {
-          if (this.bot) this.bot.setControlState('jump', false);
-        }, 300);
-      }
-    } catch (err) {
-      console.warn('Anti-AFK action error:', err.message);
-    }
-  }
-
-  async manualAction(actionType) {
-    if (!this.bot || this.state !== 'SPAWNED') {
-      throw new Error('Bot is not spawned in a world');
-    }
-
-    switch (actionType) {
-      case 'walk':
-        this.emit('log', { type: 'action', text: 'Manual: Walking around chamber' });
-        await this.roamChamber(2500);
-        break;
-      case 'eat':
-        const food = this.findBestFood();
-        if (!food) {
-          this.emit('log', { type: 'warn', text: 'Manual: No edible food found in inventory!' });
-        } else if (this.bot.food >= 20) {
-          this.emit('log', { type: 'system', text: 'Manual: Hunger bar is already full (20/20)!' });
-        } else {
-          await this.eatFood(food);
-        }
-        break;
-      case 'swing':
-        this.bot.swingArm('right');
-        this.emit('log', { type: 'action', text: 'Manual: Swung right arm' });
-        break;
-      case 'look':
-        const randomYaw = (Math.random() * Math.PI * 2) - Math.PI;
-        const randomPitch = (Math.random() * 0.6) - 0.3;
-        this.bot.look(randomYaw, randomPitch, true);
-        this.emit('log', { type: 'action', text: 'Manual: Looked around' });
-        break;
-      case 'jump':
-        this.bot.setControlState('jump', true);
-        setTimeout(() => {
-          if (this.bot) this.bot.setControlState('jump', false);
-        }, 350);
-        this.emit('log', { type: 'action', text: 'Manual: Jumped' });
-        break;
-      case 'lobby_select':
-      case 'join_smp':
-      case 'select_world':
-      case 'click_grass':
-        this.emit('log', { type: 'action', text: 'Manual: Triggered Join SMP (Lobby Selector)' });
-        await this.performLobbySelection();
-        break;
-      default:
-        throw new Error(`Unknown action: ${actionType}`);
-    }
-  }
-
-  hasLobbyItem() {
-    if (!this.bot || !this.bot.inventory) return false;
-    const slots = this.bot.inventory.slots;
-    if (!slots) return false;
-    // Check hotbar slots 36..44
-    for (let s = 36; s <= 44; s++) {
-      const it = slots[s];
-      if (it) {
-        const name = (it.name || '').toLowerCase();
-        const disp = (it.displayName || '').toLowerCase();
-        if (name === 'nether_star' || name === 'compass' || disp.includes('select') || disp.includes('server')) {
-          return true;
-        }
-      }
-    }
-    return false;
-  }
-
-  async clickGrassInWindow(window) {
-    if (!this.bot || !window) return false;
-    const bot = this.bot;
-
-    let targetSlot = 13; // default center slot in 3-row chest (27 slots)
-    if (window.slots) {
-      for (let i = 0; i < Math.min(window.slots.length, 54); i++) {
-        const item = window.slots[i];
-        if (item) {
-          const name = (item.name || '').toLowerCase();
-          const disp = (item.displayName || '').toLowerCase();
-          if (name.includes('grass') || name.includes('mycelium') || disp.includes('smp') || disp.includes('survival') || disp.includes('play')) {
-            targetSlot = i;
-            this.emit('log', { type: 'system', text: `[Lobby Selector] Found Grass Block item "${item.displayName || item.name}" at slot ${i}` });
-            break;
-          }
-        }
-      }
-    }
-
-    this.emit('log', { type: 'action', text: `[Lobby Selector] Left-clicking slot ${targetSlot} (Grass Block) to teleport to SMP...` });
-    try {
-      await bot.clickWindow(targetSlot, 0, 0);
-      this.emit('log', { type: 'system', text: '✅ [Lobby Selector] Clicked! Teleporting to your last location / SMP...' });
-      return true;
-    } catch (err) {
-      this.emit('log', { type: 'error', text: `[Lobby Selector] Click failed: ${err.message}` });
-      return false;
-    }
-  }
-
-  async performLobbySelection() {
-    if (!this.bot || this.state !== 'SPAWNED') {
-      this.emit('log', { type: 'warn', text: '[Lobby Selector] Bot is not spawned in the world yet!' });
-      return false;
-    }
-
-    const bot = this.bot;
-
-    // If chest GUI is already open:
-    if (bot.currentWindow) {
-      this.emit('log', { type: 'system', text: `[Lobby Selector] Detected open chest GUI: "${bot.currentWindow.title || 'Chest'}"` });
-      return await this.clickGrassInWindow(bot.currentWindow);
-    }
-
-    // Step 1: Find Nether Star (or hotbar slot 4)
-    let hotbarSlot = 4; // default to slot 4 (Nether star)
-    try {
-      if (bot.inventory && bot.inventory.slots) {
-        for (let s = 36; s <= 44; s++) {
-          const it = bot.inventory.slots[s];
-          if (it) {
-            const name = (it.name || '').toLowerCase();
-            const disp = (it.displayName || '').toLowerCase();
-            if (name === 'nether_star' || name === 'compass' || disp.includes('select') || disp.includes('server')) {
-              hotbarSlot = s - 36;
-              break;
-            }
-          }
-        }
-      }
-    } catch (e) {}
-
-    this.emit('log', { type: 'action', text: `[Lobby Selector] Equipping lobby item in hotbar slot ${hotbarSlot}...` });
-    try {
-      bot.setQuickBarSlot(hotbarSlot);
-    } catch (e) {}
-
-    // Wait a brief moment then right-click (activate item)
-    await new Promise(r => setTimeout(r, 350));
-    this.emit('log', { type: 'action', text: '[Lobby Selector] Right-clicking item to open Server Selector chest...' });
-
-    // Prepare promise for window open
-    const windowPromise = new Promise((resolve) => {
-      const onOpen = (win) => {
-        resolve(win);
-      };
-      bot.once('windowOpen', onOpen);
-      setTimeout(() => {
-        bot.removeListener('windowOpen', onOpen);
-        resolve(null);
-      }, 4000);
-    });
-
-    try {
-      bot.activateItem();
-    } catch (e) {
-      this.emit('log', { type: 'warn', text: `[Lobby Selector] activateItem error: ${e.message}` });
-    }
-
-    const openedWindow = await windowPromise;
-    if (openedWindow || bot.currentWindow) {
-      const win = openedWindow || bot.currentWindow;
-      this.emit('log', { type: 'system', text: `[Lobby Selector] Chest GUI opened: "${win.title || 'Server Selector'}"` });
-      await new Promise(r => setTimeout(r, 400));
-      return await this.clickGrassInWindow(win);
-    } else {
-      this.emit('log', { type: 'warn', text: '[Lobby Selector] Window did not open after right-clicking. Retrying right click...' });
-      try {
-        bot.activateItem();
-      } catch (e) {}
-      return false;
-    }
-  }
-
   sendChat(message) {
-    if (!this.bot || this.state !== 'SPAWNED') {
+    if (!this.bot || !this.hasSpawned()) {
       throw new Error('Cannot send chat: Bot is not connected or spawned');
     }
     if (!message || !message.trim()) return;
@@ -1524,6 +1492,7 @@ export class BotManager extends EventEmitter {
   disconnect() {
     this.manualDisconnect = true;
     this.clearWatchdog();
+    this.clearTpaTimeout();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -1536,44 +1505,70 @@ export class BotManager extends EventEmitter {
     this.isRoaming = false;
     this.isEating = false;
     this.clearWatchdog();
+    this.clearTpaTimeout();
     if (this.antiAfkTimer) {
       clearTimeout(this.antiAfkTimer);
       this.antiAfkTimer = null;
     }
     if (isManual) {
-      this.state = 'DISCONNECTED';
+      this.manualDisconnect = true;
+      this.reconnectAttempts = 0;
+      this.transitionTo(STATES.DISCONNECTED, 'Manual disconnect');
     }
     this.spawnTime = null;
     if (this.bot) {
       try {
         this.bot.clearControlStates();
-      } catch (e) {
-        // ignore
-      }
+      } catch (e) {}
       try {
         this.bot.removeAllListeners();
         if (this.bot._client) {
-          this.bot._client.removeAllListeners('error');
-          this.bot._client.removeAllListeners('playerChat');
-          this.bot._client.removeAllListeners('packet');
+          this.bot._client.removeAllListeners();
         }
         this.bot.quit();
-      } catch (e) {
-        // ignore
-      }
+      } catch (e) {}
       this.bot = null;
     }
     this.emit('status', this.getStatus());
   }
 
+  /**
+   * Controlled reconnection with backoff and maximum retry limit
+   */
   scheduleReconnect() {
-    if (this.manualDisconnect || !this.settings.autoReconnect || !this.currentServer) {
+    if (this.manualDisconnect) {
+      this.transitionTo(STATES.DISCONNECTED, 'Manual disconnect');
+      return;
+    }
+    if (!this.settings.autoReconnect || !this.currentServer) {
+      this.transitionTo(STATES.DISCONNECTED, 'Auto-reconnect disabled');
       return;
     }
 
-    const delaySec = Math.max(15, this.settings.autoReconnectDelaySec || 15);
-    const delay = delaySec * 1000;
-    this.emit('log', { type: 'warn', text: `Auto-reconnecting in ${delaySec}s...` });
+    this.reconnectAttempts++;
+    if (this.reconnectAttempts > this.maxReconnectAttempts) {
+      if (this.reconnectTimer) {
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
+      }
+      this.transitionTo(STATES.ERROR, `Max reconnect attempts reached (${this.maxReconnectAttempts})`);
+      this.emit('log', {
+        type: 'error',
+        text: `[ERROR] Reconnection failed. Reason: Maximum retry limit (${this.maxReconnectAttempts}) reached. Manual intervention required.`
+      });
+      return;
+    }
+
+    const baseDelaySec = Math.max(5, this.settings.autoReconnectDelaySec || 10);
+    // Backoff factor capped at 60s
+    const backoffFactor = Math.min(5, Math.pow(1.2, this.reconnectAttempts - 1));
+    const delaySec = Math.min(60, Math.round(baseDelaySec * backoffFactor));
+
+    this.transitionTo(STATES.RECONNECTING, `Attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}`);
+    this.emit('log', {
+      type: 'warn',
+      text: `[RECONNECTING] Attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${delaySec}s...`
+    });
 
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = setTimeout(() => {
@@ -1581,7 +1576,32 @@ export class BotManager extends EventEmitter {
       if (!this.manualDisconnect && this.currentServer) {
         this.connect(this.currentServer);
       }
-    }, delay);
-    this.emit('status', this.getStatus());
+    }, delaySec * 1000);
+  }
+
+  async manualAction(actionType) {
+    if (!this.bot || !this.hasSpawned()) {
+      throw new Error('Bot is not spawned in a world');
+    }
+
+    switch (actionType) {
+      case 'eat':
+        await this.eatFood();
+        break;
+      case 'swing':
+        this.bot.swingArm('right');
+        this.emit('log', { type: 'action', text: 'Manual: Swung right arm' });
+        break;
+      case 'accept_tpa':
+        this.bot.chat('/tpaccept');
+        this.emit('log', { type: 'action', text: 'Manual: Sent /tpaccept' });
+        break;
+      case 'stand_still':
+        this.bot.clearControlStates();
+        this.emit('log', { type: 'action', text: 'Manual: Enforced standstill' });
+        break;
+      default:
+        throw new Error(`Unknown manual action: ${actionType}`);
+    }
   }
 }

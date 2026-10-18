@@ -13,29 +13,33 @@ if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
-// Initial settings default: permittedUsers stores guest/additional allowed users.
-// Phyroosh is hardcoded as the permanent root owner in the backend.
+// Initial settings default:
+// trustedPlayer is the account authorized to send TPA requests and control the AFK bot.
 const DEFAULT_SETTINGS = {
-  defaultUsername: 'Dream',
-  defaultPassword: '209801',
+  trustedPlayer: process.env.TRUSTED_PLAYER || 'Phyroosh',
+  defaultUsername: process.env.DEFAULT_USERNAME || 'Dream',
+  defaultPassword: process.env.DEFAULT_PASSWORD || '209801',
   autoLogin: true,
   autoEat: true,
   autoEatThreshold: 16,
-  aiModel: 'nvidia/nemotron-3-super-120b-a12b',
+  aiModel: process.env.NVIDIA_MODEL || 'nvidia/nemotron-3-super-120b-a12b',
   worldSeed: '',
-  autoJoinSmp: true,
+  autoJoinSmp: false,
   antiAfkEnabled: true,
-  antiAfkIntervalSec: 8,
+  antiAfkMode: 'still', // 'still' = stand still (farm safe); 'subtle' = small safe nudge
+  antiAfkIntervalSec: 30,
   antiAfkActions: {
-    walkAround: true,
-    swingArm: true,
-    lookAround: true,
-    jump: true,
+    walkAround: false,
+    swingArm: false,
+    lookAround: false,
+    jump: false,
     microStep: false,
     sneak: false
   },
   autoReconnect: true,
-  autoReconnectDelaySec: 15,
+  autoReconnectDelaySec: 10,
+  maxReconnectAttempts: 10,
+  tpaTimeoutSec: 25,
   permittedUsers: []
 };
 
@@ -92,19 +96,7 @@ export function saveSettings(settings) {
   }
 }
 
-const DEFAULT_SERVERS = [
-  {
-    id: "srv_default",
-    name: "hyrixsmp3.aternos.me:26743",
-    host: "hyrixsmp3.aternos.me",
-    port: 26743,
-    version: "auto",
-    username: "Dream",
-    loginPassword: "209801",
-    autoLogin: true,
-    lastJoined: new Date().toISOString()
-  }
-];
+const DEFAULT_SERVERS = [];
 
 export function getSavedServers() {
   try {
