@@ -69,6 +69,7 @@ botManager.on('status', (status) => io.emit('bot:status', status));
 botManager.on('chat', (msg) => io.emit('bot:chat', msg));
 botManager.on('log', (log) => io.emit('bot:log', log));
 botManager.on('settings', (settings) => io.emit('bot:settings', settings));
+botManager.on('inventory', (inv) => io.emit('bot:inventory', inv));
 
 // API Routes
 app.get('/api/status', (req, res) => {
@@ -193,11 +194,84 @@ app.post('/api/bot/disconnect', (req, res) => {
   }
 });
 
+app.get('/api/inventory', (req, res) => {
+  res.json(botManager.getInventory());
+});
+
 app.post('/api/bot/action', (req, res) => {
   try {
     const { action } = req.body;
     botManager.manualAction(action);
     res.json({ success: true, action });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/bot/hand-action', async (req, res) => {
+  try {
+    const { action, slot, offHand, intervalMs, all } = req.body;
+    let result = { success: true };
+    switch (action) {
+      case 'set_hotbar':
+      case 'set_slot':
+        result = botManager.setQuickBarSlot(slot);
+        break;
+      case 'right_click':
+        result = botManager.rightClick(offHand);
+        break;
+      case 'start_right_click_hold':
+        result = botManager.startRightClickHold(offHand);
+        break;
+      case 'stop_right_click_hold':
+        result = botManager.stopRightClickHold();
+        break;
+      case 'left_click':
+        result = botManager.leftClick();
+        break;
+      case 'start_left_click_hold':
+        result = botManager.startLeftClickHold(intervalMs);
+        break;
+      case 'stop_left_click_hold':
+        result = botManager.stopLeftClickHold();
+        break;
+      case 'drop_held':
+        result = await botManager.dropHeldItem(all !== false);
+        break;
+      case 'consume':
+        result = await botManager.consumeHeldItem();
+        break;
+      default:
+        return res.status(400).json({ error: `Unknown hand action: ${action}` });
+    }
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/bot/inventory-action', async (req, res) => {
+  try {
+    const { action, sourceSlot, destSlot, slot, destination, count, mouseButton, mode } = req.body;
+    let result = { success: true };
+    switch (action) {
+      case 'swap':
+      case 'move':
+        result = await botManager.swapSlots(sourceSlot, destSlot);
+        break;
+      case 'drop':
+        result = await botManager.dropSlot(slot, count);
+        break;
+      case 'equip':
+        result = await botManager.equipSlot(slot, destination || 'hand');
+        break;
+      case 'click_window':
+        result = await botManager.clickWindowSlot(slot, mouseButton || 0, mode || 0);
+        break;
+      default:
+        return res.status(400).json({ error: `Unknown inventory action: ${action}` });
+    }
+    res.json(result);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -217,6 +291,7 @@ app.post('/api/bot/chat', (req, res) => {
 io.on('connection', (socket) => {
   // Send initial state on connection
   socket.emit('bot:status', botManager.getStatus());
+  socket.emit('bot:inventory', botManager.getInventory());
   socket.emit('servers:updated', storage.getSavedServers());
   socket.emit('bot:settings', storage.getSettings());
 
@@ -225,6 +300,82 @@ io.on('connection', (socket) => {
   socket.on('bot:action', (action) => {
     try {
       botManager.manualAction(action);
+    } catch (e) {
+      socket.emit('bot:log', { type: 'error', text: e.message });
+    }
+  });
+  socket.on('bot:hand_action', async (data) => {
+    try {
+      const act = typeof data === 'string' ? data : data?.action;
+      const offHand = data?.offHand;
+      const slot = data?.slot;
+      const intervalMs = data?.intervalMs;
+      const all = data?.all;
+      switch (act) {
+        case 'set_hotbar':
+        case 'set_slot':
+          botManager.setQuickBarSlot(slot);
+          break;
+        case 'right_click':
+          botManager.rightClick(offHand);
+          break;
+        case 'start_right_click_hold':
+          botManager.startRightClickHold(offHand);
+          break;
+        case 'stop_right_click_hold':
+          botManager.stopRightClickHold();
+          break;
+        case 'left_click':
+          botManager.leftClick();
+          break;
+        case 'start_left_click_hold':
+          botManager.startLeftClickHold(intervalMs);
+          break;
+        case 'stop_left_click_hold':
+          botManager.stopLeftClickHold();
+          break;
+        case 'drop_held':
+          await botManager.dropHeldItem(all !== false);
+          break;
+        case 'consume':
+          await botManager.consumeHeldItem();
+          break;
+        default:
+          botManager.manualAction(act);
+      }
+    } catch (e) {
+      socket.emit('bot:log', { type: 'error', text: e.message });
+    }
+  });
+
+  socket.on('bot:inventory_action', async (data) => {
+    try {
+      const { action, sourceSlot, destSlot, slot, destination, count, mouseButton, mode } = data || {};
+      switch (action) {
+        case 'swap':
+        case 'move':
+          await botManager.swapSlots(sourceSlot, destSlot);
+          break;
+        case 'drop':
+          await botManager.dropSlot(slot, count);
+          break;
+        case 'equip':
+          await botManager.equipSlot(slot, destination || 'hand');
+          break;
+        case 'click_window':
+          await botManager.clickWindowSlot(slot, mouseButton || 0, mode || 0);
+          break;
+        default:
+          throw new Error(`Unknown inventory action: ${action}`);
+      }
+    } catch (e) {
+      socket.emit('bot:log', { type: 'error', text: e.message });
+    }
+  });
+
+  socket.on('bot:set_hotbar', (slot) => {
+    try {
+      botManager.setQuickBarSlot(slot);
     } catch (e) {
       socket.emit('bot:log', { type: 'error', text: e.message });
     }

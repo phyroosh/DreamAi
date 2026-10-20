@@ -61,8 +61,11 @@
       </section>
 
       <!-- Inventory Panel (Hidden when disconnected) -->
-      <section id="panel-inventory" class="panel hidden" style="flex-shrink: 0; max-height: 200px; display: flex; flex-direction: column;">
-        <h3 class="panel-title">Inventory</h3>
+      <section id="panel-inventory" class="panel hidden" style="flex-shrink: 0; max-height: 230px; display: flex; flex-direction: column;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <h3 class="panel-title" style="margin:0;">Inventory</h3>
+          <button id="btn-open-inv-sidebar" class="btn btn-primary btn-sm" style="padding:2px 6px; font-size:10px;">Full Grid (E)</button>
+        </div>
         <div class="armor-row" id="inv-armor">
           <!-- Populated by JS -->
         </div>
@@ -144,6 +147,41 @@
         <button id="btn-clear" class="btn btn-icon btn-sm" title="Clear Logs">🗑️</button>
       </div>
       <div id="terminal" class="terminal"></div>
+
+      <!-- Manual Control Deck (Hand Actions + Hotbar 1-9) -->
+      <div id="manual-control-deck" class="manual-control-deck hidden">
+        <div class="deck-top-row">
+          <div class="deck-group">
+            <span class="deck-label">MOUSE & HAND</span>
+            <div class="deck-buttons">
+              <button type="button" id="btn-left-click" class="btn btn-action" title="Left Click (Punch / Attack)">👊 Left Click</button>
+              <button type="button" id="btn-hold-left" class="btn btn-action btn-toggle" title="Hold Left Click (Continuous Attack/Swing)">⚔️ <span id="label-hold-left">Hold Left</span></button>
+              <button type="button" id="btn-right-click" class="btn btn-action" title="Right Click (Interact / Place / Use)">👆 Right Click</button>
+              <button type="button" id="btn-hold-right" class="btn btn-action btn-toggle" title="Hold Right Click (Eat Food, Draw Bow, Shield)">🛡️ <span id="label-hold-right">Hold Right</span></button>
+            </div>
+          </div>
+          <div class="deck-group">
+            <span class="deck-label">ACTIONS</span>
+            <div class="deck-buttons">
+              <button type="button" id="btn-eat-food" class="btn btn-action" title="Eat food held in main hand">🍖 Eat Food</button>
+              <button type="button" id="btn-drop-held" class="btn btn-action" title="Drop held item (Key: Q)">🗑️ Drop (Q)</button>
+              <button type="button" id="btn-open-inventory" class="btn btn-primary btn-action" title="Open Full Minecraft Inventory (Key: E)">🎒 Inventory (E)</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Hotbar Strip (Keys 1-9) -->
+        <div class="deck-hotbar-row">
+          <div class="hotbar-info">
+            <span class="hotbar-tag">HOTBAR (1-9):</span>
+            <span id="hotbar-active-name" class="hotbar-active-name">Slot 1: Hand</span>
+          </div>
+          <div class="hotbar-slots-strip" id="hotbar-strip">
+            <!-- 9 slots rendered by JS -->
+          </div>
+        </div>
+      </div>
+
       <form id="form-chat" class="chat-bar">
         <input type="text" id="inp-chat" placeholder="Type a chat message or /command..." autocomplete="off">
         <button type="submit" class="btn btn-primary">Send</button>
@@ -271,6 +309,94 @@
           <p class="help-text" style="margin-left:0; margin-top:8px;">
             <strong>phyrooss</strong> is permanent root owner. Allowed users can speak to AI via <strong>GPT</strong>, <strong>Dream</strong>, or private whispers.
           </p>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Minecraft Inventory Modal -->
+  <dialog id="modal-inventory" class="modal modal-inv">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <h2>🎒 Minecraft Inventory & Equipment</h2>
+          <span id="inv-state-badge" class="inv-badge">Connected</span>
+        </div>
+        <button id="btn-close-inventory" class="btn-close">×</button>
+      </div>
+
+      <div class="modal-body inv-modal-body">
+        <!-- Equipment Row: Armor (5-8) and Off-hand (45) -->
+        <div class="inv-equipment-bar">
+          <div class="inv-section-title">Armor & Off-Hand</div>
+          <div class="inv-equipment-grid">
+            <div class="inv-slot-wrap" title="Helmet (Slot 5)">
+              <span class="slot-type-label">Head</span>
+              <div class="mc-slot armor-slot-box" data-slot="5">
+                <span class="mc-slot-empty">🪖</span>
+              </div>
+            </div>
+            <div class="inv-slot-wrap" title="Chestplate (Slot 6)">
+              <span class="slot-type-label">Chest</span>
+              <div class="mc-slot armor-slot-box" data-slot="6">
+                <span class="mc-slot-empty">👕</span>
+              </div>
+            </div>
+            <div class="inv-slot-wrap" title="Leggings (Slot 7)">
+              <span class="slot-type-label">Legs</span>
+              <div class="mc-slot armor-slot-box" data-slot="7">
+                <span class="mc-slot-empty">👖</span>
+              </div>
+            </div>
+            <div class="inv-slot-wrap" title="Boots (Slot 8)">
+              <span class="slot-type-label">Boots</span>
+              <div class="mc-slot armor-slot-box" data-slot="8">
+                <span class="mc-slot-empty">👢</span>
+              </div>
+            </div>
+            <div class="inv-slot-divider"></div>
+            <div class="inv-slot-wrap" title="Off-Hand Shield/Totem (Slot 45)">
+              <span class="slot-type-label">Offhand</span>
+              <div class="mc-slot offhand-slot-box" data-slot="45">
+                <span class="mc-slot-empty">🛡️</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Main 27-slot Inventory (Slots 9-35) -->
+        <div class="inv-main-container">
+          <div class="inv-section-title">Main Inventory (Slots 9–35)</div>
+          <div class="mc-grid mc-main-grid" id="mc-main-grid">
+            <!-- 27 slots generated by JS -->
+          </div>
+        </div>
+
+        <!-- Hotbar 9-slot Inventory (Slots 36-44) -->
+        <div class="inv-hotbar-container">
+          <div class="inv-section-title">Hotbar (Slots 36–44 / Hotbar 1–9)</div>
+          <div class="mc-grid mc-hotbar-grid" id="mc-hotbar-grid">
+            <!-- 9 slots generated by JS -->
+          </div>
+        </div>
+
+        <!-- Selected Slot Action Palette -->
+        <div id="inv-slot-actions" class="inv-slot-actions">
+          <div class="inv-selected-info">
+            <span class="inv-info-title">Selected Slot:</span>
+            <span id="inv-selected-text" class="inv-selected-text">Click a slot to select, swap, or manage</span>
+          </div>
+          <div class="inv-action-buttons">
+            <button type="button" id="btn-slot-equip" class="btn btn-secondary btn-sm" disabled>Equip to Hand</button>
+            <button type="button" id="btn-slot-consume" class="btn btn-secondary btn-sm" disabled>Eat / Consume</button>
+            <button type="button" id="btn-slot-drop1" class="btn btn-secondary btn-sm" disabled>Drop 1</button>
+            <button type="button" id="btn-slot-dropall" class="btn btn-danger btn-sm" disabled>Drop Stack</button>
+            <button type="button" id="btn-slot-deselect" class="btn btn-secondary btn-sm" disabled>Deselect</button>
+          </div>
+        </div>
+
+        <div class="inv-footer-tips">
+          💡 <strong>Tips:</strong> Click any slot then another slot to <strong>swap</strong> them. Press <strong>1–9</strong> for hotbar, <strong>E</strong> for inventory, <strong>Q</strong> to drop held items.
         </div>
       </div>
     </div>

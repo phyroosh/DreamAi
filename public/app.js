@@ -53,6 +53,38 @@ const btnSaveSeed = document.getElementById('btn-save-seed');
 const panelInventory = document.getElementById('panel-inventory');
 const invArmor = document.getElementById('inv-armor');
 const invItems = document.getElementById('inv-items');
+const btnOpenInvSidebar = document.getElementById('btn-open-inv-sidebar');
+
+// Manual Control Deck
+const manualControlDeck = document.getElementById('manual-control-deck');
+const btnLeftClick = document.getElementById('btn-left-click');
+const btnHoldLeft = document.getElementById('btn-hold-left');
+const labelHoldLeft = document.getElementById('label-hold-left');
+const btnRightClick = document.getElementById('btn-right-click');
+const btnHoldRight = document.getElementById('btn-hold-right');
+const labelHoldRight = document.getElementById('label-hold-right');
+const btnEatFood = document.getElementById('btn-eat-food');
+const btnDropHeld = document.getElementById('btn-drop-held');
+const btnOpenInventory = document.getElementById('btn-open-inventory');
+const hotbarActiveName = document.getElementById('hotbar-active-name');
+const hotbarStrip = document.getElementById('hotbar-strip');
+
+// Full Inventory Modal
+const modalInventory = document.getElementById('modal-inventory');
+const btnCloseInventory = document.getElementById('btn-close-inventory');
+const mcMainGrid = document.getElementById('mc-main-grid');
+const mcHotbarGrid = document.getElementById('mc-hotbar-grid');
+const invSelectedText = document.getElementById('inv-selected-text');
+const btnSlotEquip = document.getElementById('btn-slot-equip');
+const btnSlotConsume = document.getElementById('btn-slot-consume');
+const btnSlotDrop1 = document.getElementById('btn-slot-drop1');
+const btnSlotDropAll = document.getElementById('btn-slot-dropall');
+const btnSlotDeselect = document.getElementById('btn-slot-deselect');
+
+let currentInventory = null;
+let selectedSlot = null;
+let isHoldingRightClick = false;
+let isHoldingLeftClick = false;
 
 const panelPlayers = document.getElementById('panel-players');
 const listPlayers = document.getElementById('list-players');
@@ -260,6 +292,389 @@ document.addEventListener('click', (e) => {
   }
 });
 
+// Item Emoji mapper
+function getItemEmoji(name = '') {
+  const n = (name || '').toLowerCase();
+  if (n.includes('sword') || n.includes('axe') || n.includes('trident') || n.includes('mace')) return '⚔️';
+  if (n.includes('bow') || n.includes('arrow')) return '🏹';
+  if (n.includes('shield')) return '🛡️';
+  if (n.includes('helmet') || n.includes('cap')) return '🪖';
+  if (n.includes('chestplate') || n.includes('tunic')) return '👕';
+  if (n.includes('leggings') || n.includes('pants')) return '👖';
+  if (n.includes('boots') || n.includes('shoes')) return '👢';
+  if (n.includes('pickaxe') || n.includes('shovel') || n.includes('hoe')) return '⛏️';
+  if (n.includes('golden_apple') || n.includes('gapple')) return '🍏';
+  if (n.includes('beef') || n.includes('pork') || n.includes('mutton') || n.includes('steak') || n.includes('meat') || n.includes('chicken') || n.includes('fish') || n.includes('bread') || n.includes('apple') || n.includes('carrot') || n.includes('potato') || n.includes('cookie') || n.includes('melon') || n.includes('pie') || n.includes('stew') || n.includes('berry')) return '🍖';
+  if (n.includes('potion')) return '🧪';
+  if (n.includes('totem')) return '🪬';
+  if (n.includes('diamond')) return '💎';
+  if (n.includes('emerald')) return '❇️';
+  if (n.includes('gold') || n.includes('ingot')) return '🪙';
+  if (n.includes('nether_star') || n.includes('star')) return '⭐';
+  if (n.includes('ender_pearl') || n.includes('eye_of_ender')) return '🔮';
+  if (n.includes('block') || n.includes('stone') || n.includes('dirt') || n.includes('cobble') || n.includes('plank') || n.includes('wood') || n.includes('log') || n.includes('sand')) return '🧱';
+  return '📦';
+}
+
+function getItemForSlot(slotNum) {
+  if (!currentInventory) return null;
+  const s = parseInt(slotNum, 10);
+  if (s === 5) return currentInventory.armor?.helmet || null;
+  if (s === 6) return currentInventory.armor?.chestplate || null;
+  if (s === 7) return currentInventory.armor?.leggings || null;
+  if (s === 8) return currentInventory.armor?.boots || null;
+  if (s === 45) return currentInventory.offhand || null;
+  if (s >= 36 && s <= 44) {
+    return currentInventory.hotbar?.[s - 36]?.item || null;
+  }
+  if (s >= 9 && s <= 35) {
+    const found = currentInventory.main?.find(m => m.slot === s);
+    if (found) return found.item;
+  }
+  return currentInventory.items?.find(i => i.slot === s) || null;
+}
+
+function renderHotbarStrip() {
+  if (!hotbarStrip) return;
+  if (!currentInventory || !currentInventory.hotbar) {
+    hotbarStrip.innerHTML = '';
+    return;
+  }
+
+  const activeIdx = Number(currentInventory.quickBarSlot) || 0;
+  let html = '';
+  for (let i = 0; i < 9; i++) {
+    const slotNum = 36 + i;
+    const slotObj = currentInventory.hotbar[i];
+    const item = slotObj?.item;
+    const isActive = i === activeIdx;
+    const title = item ? `${item.displayName || item.name} (x${item.count}) [Slot ${i+1}]` : `Slot ${i+1} (Empty Hand)`;
+    const label = item ? `${getItemEmoji(item.name)} ${item.displayName || item.name}` : '—';
+    const countBadge = item && item.count > 1 ? `<span class="slot-count-badge">${item.count}</span>` : '';
+
+    html += `
+      <div class="hotbar-slot-box ${isActive ? 'active' : ''}" data-hotbar-index="${i}" data-slot="${slotNum}" title="${title}">
+        <span class="slot-num-badge">${i + 1}</span>
+        <span class="slot-item-label">${label}</span>
+        ${countBadge}
+      </div>
+    `;
+  }
+  hotbarStrip.innerHTML = html;
+
+  hotbarStrip.querySelectorAll('.hotbar-slot-box').forEach(el => {
+    el.onclick = () => {
+      const idx = parseInt(el.dataset.hotbarIndex, 10);
+      socket.emit('bot:set_hotbar', idx);
+    };
+  });
+
+  const activeItem = currentInventory.hotbar[activeIdx]?.item;
+  if (hotbarActiveName) {
+    hotbarActiveName.textContent = activeItem
+      ? `Slot ${activeIdx + 1}: ${activeItem.displayName || activeItem.name} (x${activeItem.count})`
+      : `Slot ${activeIdx + 1}: Empty (Hand)`;
+  }
+}
+
+function updateSlotActions() {
+  if (!invSelectedText) return;
+  if (selectedSlot === null) {
+    invSelectedText.textContent = 'None (Click a slot to select, swap, or manage)';
+    if (btnSlotEquip) btnSlotEquip.disabled = true;
+    if (btnSlotConsume) btnSlotConsume.disabled = true;
+    if (btnSlotDrop1) btnSlotDrop1.disabled = true;
+    if (btnSlotDropAll) btnSlotDropAll.disabled = true;
+    if (btnSlotDeselect) btnSlotDeselect.disabled = true;
+  } else {
+    const item = getItemForSlot(selectedSlot);
+    if (item) {
+      invSelectedText.textContent = `Slot ${selectedSlot}: ${item.displayName || item.name} (x${item.count})`;
+      if (btnSlotEquip) btnSlotEquip.disabled = false;
+      if (btnSlotConsume) btnSlotConsume.disabled = false;
+      if (btnSlotDrop1) btnSlotDrop1.disabled = false;
+      if (btnSlotDropAll) btnSlotDropAll.disabled = false;
+    } else {
+      invSelectedText.textContent = `Slot ${selectedSlot}: Empty (Click another slot to move items here)`;
+      if (btnSlotEquip) btnSlotEquip.disabled = true;
+      if (btnSlotConsume) btnSlotConsume.disabled = true;
+      if (btnSlotDrop1) btnSlotDrop1.disabled = true;
+      if (btnSlotDropAll) btnSlotDropAll.disabled = true;
+    }
+    if (btnSlotDeselect) btnSlotDeselect.disabled = false;
+  }
+}
+
+function onSlotClicked(slotNum) {
+  const s = parseInt(slotNum, 10);
+  if (selectedSlot === null) {
+    selectedSlot = s;
+    renderFullInventoryModal();
+    updateSlotActions();
+  } else if (selectedSlot === s) {
+    selectedSlot = null;
+    renderFullInventoryModal();
+    updateSlotActions();
+  } else {
+    // Swap items between selectedSlot and target s
+    const src = selectedSlot;
+    const dst = s;
+    selectedSlot = null;
+    socket.emit('bot:inventory_action', {
+      action: 'swap',
+      sourceSlot: src,
+      destSlot: dst
+    });
+    renderFullInventoryModal();
+    updateSlotActions();
+  }
+}
+
+function renderFullInventoryModal() {
+  if (!modalInventory) return;
+
+  // 1. Armor & Offhand
+  [5, 6, 7, 8, 45].forEach(s => {
+    const el = document.querySelector(`.mc-slot[data-slot="${s}"]`);
+    if (!el) return;
+    const item = getItemForSlot(s);
+    const isSelected = selectedSlot === s;
+    el.className = `mc-slot ${s === 45 ? 'offhand-slot-box' : 'armor-slot-box'} ${isSelected ? 'selected' : ''}`;
+    if (item) {
+      el.innerHTML = `
+        <span class="mc-slot-num">${s}</span>
+        <div class="mc-slot-content">
+          <span class="mc-slot-icon">${getItemEmoji(item.name)}</span>
+          <span class="mc-slot-name-label">${item.displayName || item.name}</span>
+        </div>
+        ${item.count > 1 ? `<span class="mc-slot-count">${item.count}</span>` : ''}
+      `;
+    } else {
+      const placeholders = { 5: '🪖', 6: '👕', 7: '👖', 8: '👢', 45: '🛡️' };
+      el.innerHTML = `<span class="mc-slot-num">${s}</span><span class="mc-slot-empty">${placeholders[s]}</span>`;
+    }
+    el.onclick = () => onSlotClicked(s);
+  });
+
+  // 2. Main 27-slot inventory (9-35)
+  if (mcMainGrid) {
+    let mainHtml = '';
+    for (let s = 9; s <= 35; s++) {
+      const item = getItemForSlot(s);
+      const isSelected = selectedSlot === s;
+      const title = item ? `${item.displayName || item.name} (x${item.count}) [Slot ${s}]` : `Slot ${s} (Empty)`;
+      mainHtml += `
+        <div class="mc-slot ${isSelected ? 'selected' : ''}" data-slot="${s}" title="${title}">
+          <span class="mc-slot-num">${s}</span>
+          ${item ? `
+            <div class="mc-slot-content">
+              <span class="mc-slot-icon">${getItemEmoji(item.name)}</span>
+              <span class="mc-slot-name-label">${item.displayName || item.name}</span>
+            </div>
+            ${item.count > 1 ? `<span class="mc-slot-count">${item.count}</span>` : ''}
+          ` : `<span class="mc-slot-empty">·</span>`}
+        </div>
+      `;
+    }
+    mcMainGrid.innerHTML = mainHtml;
+    mcMainGrid.querySelectorAll('.mc-slot').forEach(el => {
+      const s = parseInt(el.dataset.slot, 10);
+      el.onclick = () => onSlotClicked(s);
+    });
+  }
+
+  // 3. Hotbar 9-slot inventory (36-44)
+  if (mcHotbarGrid) {
+    const activeHotbarIdx = Number(currentInventory?.quickBarSlot) || 0;
+    let hotbarHtml = '';
+    for (let s = 36; s <= 44; s++) {
+      const i = s - 36;
+      const item = getItemForSlot(s);
+      const isSelected = selectedSlot === s;
+      const isActive = i === activeHotbarIdx;
+      const title = item ? `${item.displayName || item.name} (x${item.count}) [Slot ${s} / Hotbar ${i + 1}]` : `Hotbar ${i + 1} [Slot ${s}] (Empty)`;
+      hotbarHtml += `
+        <div class="mc-slot ${isSelected ? 'selected' : ''} ${isActive ? 'active-hotbar' : ''}" data-slot="${s}" data-hotbar-index="${i}" title="${title}">
+          <span class="mc-slot-num">${i + 1}</span>
+          ${item ? `
+            <div class="mc-slot-content">
+              <span class="mc-slot-icon">${getItemEmoji(item.name)}</span>
+              <span class="mc-slot-name-label">${item.displayName || item.name}</span>
+            </div>
+            ${item.count > 1 ? `<span class="mc-slot-count">${item.count}</span>` : ''}
+          ` : `<span class="mc-slot-empty">·</span>`}
+        </div>
+      `;
+    }
+    mcHotbarGrid.innerHTML = hotbarHtml;
+    mcHotbarGrid.querySelectorAll('.mc-slot').forEach(el => {
+      const s = parseInt(el.dataset.slot, 10);
+      el.onclick = () => onSlotClicked(s);
+    });
+  }
+
+  updateSlotActions();
+}
+
+function updateControlDeckUI() {
+  if (currentInventory) {
+    if (currentInventory.isHoldingRightClick !== undefined) {
+      isHoldingRightClick = !!currentInventory.isHoldingRightClick;
+    }
+    if (currentInventory.isHoldingLeftClick !== undefined) {
+      isHoldingLeftClick = !!currentInventory.isHoldingLeftClick;
+    }
+  }
+
+  if (btnHoldRight && labelHoldRight) {
+    btnHoldRight.classList.toggle('btn-holding-right', isHoldingRightClick);
+    labelHoldRight.textContent = isHoldingRightClick ? 'Release Right (Holding...)' : 'Hold Right';
+  }
+
+  if (btnHoldLeft && labelHoldLeft) {
+    btnHoldLeft.classList.toggle('btn-holding-left', isHoldingLeftClick);
+    labelHoldLeft.textContent = isHoldingLeftClick ? 'Release Left (Attacking...)' : 'Hold Left';
+  }
+}
+
+// Hand Action Listeners
+if (btnLeftClick) {
+  btnLeftClick.onclick = () => socket.emit('bot:hand_action', { action: 'left_click' });
+}
+if (btnHoldLeft) {
+  btnHoldLeft.onclick = () => {
+    if (isHoldingLeftClick) {
+      socket.emit('bot:hand_action', { action: 'stop_left_click_hold' });
+    } else {
+      socket.emit('bot:hand_action', { action: 'start_left_click_hold' });
+    }
+  };
+}
+if (btnRightClick) {
+  btnRightClick.onclick = () => socket.emit('bot:hand_action', { action: 'right_click' });
+}
+if (btnHoldRight) {
+  btnHoldRight.onclick = () => {
+    if (isHoldingRightClick) {
+      socket.emit('bot:hand_action', { action: 'stop_right_click_hold' });
+    } else {
+      socket.emit('bot:hand_action', { action: 'start_right_click_hold' });
+    }
+  };
+}
+if (btnEatFood) {
+  btnEatFood.onclick = () => socket.emit('bot:hand_action', { action: 'consume' });
+}
+if (btnDropHeld) {
+  btnDropHeld.onclick = () => socket.emit('bot:hand_action', { action: 'drop_held', all: true });
+}
+if (btnOpenInventory) {
+  btnOpenInventory.onclick = () => {
+    modalInventory.showModal();
+    renderFullInventoryModal();
+  };
+}
+if (btnOpenInvSidebar) {
+  btnOpenInvSidebar.onclick = () => {
+    modalInventory.showModal();
+    renderFullInventoryModal();
+  };
+}
+if (btnCloseInventory) {
+  btnCloseInventory.onclick = () => modalInventory.close();
+}
+
+// Inventory Modal Actions
+if (btnSlotEquip) {
+  btnSlotEquip.onclick = () => {
+    if (selectedSlot !== null) {
+      socket.emit('bot:inventory_action', { action: 'equip', slot: selectedSlot, destination: 'hand' });
+    }
+  };
+}
+if (btnSlotConsume) {
+  btnSlotConsume.onclick = () => {
+    if (selectedSlot !== null) {
+      socket.emit('bot:inventory_action', { action: 'equip', slot: selectedSlot, destination: 'hand' });
+      setTimeout(() => socket.emit('bot:hand_action', { action: 'consume' }), 200);
+    }
+  };
+}
+if (btnSlotDrop1) {
+  btnSlotDrop1.onclick = () => {
+    if (selectedSlot !== null) {
+      socket.emit('bot:inventory_action', { action: 'drop', slot: selectedSlot, count: 1 });
+    }
+  };
+}
+if (btnSlotDropAll) {
+  btnSlotDropAll.onclick = () => {
+    if (selectedSlot !== null) {
+      socket.emit('bot:inventory_action', { action: 'drop', slot: selectedSlot });
+    }
+  };
+}
+if (btnSlotDeselect) {
+  btnSlotDeselect.onclick = () => {
+    selectedSlot = null;
+    renderFullInventoryModal();
+    updateSlotActions();
+  };
+}
+
+// Global Keyboard Shortcuts (Keys 1-9 for Hotbar, E for Inv, Q for Drop)
+document.addEventListener('keydown', (e) => {
+  const tag = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
+  if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+
+  // 1-9 for Hotbar selection
+  if (e.key >= '1' && e.key <= '9') {
+    e.preventDefault();
+    const idx = parseInt(e.key, 10) - 1;
+    socket.emit('bot:set_hotbar', idx);
+    return;
+  }
+
+  // E for Inventory Modal toggle
+  if (e.key === 'e' || e.key === 'E') {
+    e.preventDefault();
+    if (modalInventory && modalInventory.open) {
+      modalInventory.close();
+    } else if (modalInventory) {
+      modalInventory.showModal();
+      renderFullInventoryModal();
+    }
+    return;
+  }
+
+  // Q for Drop Held item
+  if (e.key === 'q' || e.key === 'Q') {
+    e.preventDefault();
+    socket.emit('bot:hand_action', { action: 'drop_held', all: !e.shiftKey });
+    return;
+  }
+
+  // Escape to close inventory or deselect
+  if (e.key === 'Escape') {
+    if (selectedSlot !== null) {
+      selectedSlot = null;
+      renderFullInventoryModal();
+      updateSlotActions();
+    }
+  }
+});
+
+// bot:inventory socket event
+socket.on('bot:inventory', (inv) => {
+  if (!inv) return;
+  currentInventory = inv;
+  renderHotbarStrip();
+  if (modalInventory && modalInventory.open) {
+    renderFullInventoryModal();
+  }
+  updateControlDeckUI();
+});
+
 document.querySelectorAll('[data-action]').forEach(btn => {
   btn.onclick = () => socket.emit('bot:action', btn.dataset.action);
 });
@@ -291,6 +706,11 @@ socket.on('bot:status', (st) => {
   panelServerInfo.classList.toggle('hidden', !hasTelemetry);
   panelInventory.classList.toggle('hidden', !hasTelemetry);
   panelPlayers.classList.toggle('hidden', !hasTelemetry);
+  if (manualControlDeck) manualControlDeck.classList.toggle('hidden', !hasTelemetry);
+
+  if (st.isHoldingRightClick !== undefined) isHoldingRightClick = !!st.isHoldingRightClick;
+  if (st.isHoldingLeftClick !== undefined) isHoldingLeftClick = !!st.isHoldingLeftClick;
+  updateControlDeckUI();
 
   if (st.health !== undefined) valHealth.textContent = `${st.health}/20`;
   if (st.food !== undefined) valFood.textContent = `${st.food}/20`;
@@ -348,6 +768,12 @@ socket.on('bot:status', (st) => {
 
     if (!itemsHtml) itemsHtml = '<div class="empty-text">Inventory Empty</div>';
     invItems.innerHTML = itemsHtml;
+
+    currentInventory = st.inventory;
+    renderHotbarStrip();
+    if (modalInventory && modalInventory.open) {
+      renderFullInventoryModal();
+    }
   }
 
   // Players

@@ -48,6 +48,12 @@ export class BotManager extends EventEmitter {
     this.tpaTimeoutTimer = null;
     this.spawnTime = null;
 
+    // Manual mouse & hand control states
+    this.isHoldingRightClick = false;
+    this.isHoldingLeftClick = false;
+    this.leftClickInterval = null;
+    this._lastInvStatus = 0;
+
     // Farm & Teleport verification
     this.preTeleportPos = null;
     this.preTeleportDim = null;
@@ -350,34 +356,80 @@ export class BotManager extends EventEmitter {
   }
 
   getInventory() {
-    if (!this.bot || !this.bot.inventory) return { items: [], armor: {}, heldItem: null, offhand: null };
+    if (!this.bot || !this.bot.inventory) {
+      return {
+        items: [],
+        armor: { helmet: null, chestplate: null, leggings: null, boots: null },
+        heldItem: null,
+        offhand: null,
+        quickBarSlot: 0,
+        isHoldingRightClick: !!this.isHoldingRightClick,
+        isHoldingLeftClick: !!this.isHoldingLeftClick,
+        hotbar: Array.from({ length: 9 }, (_, i) => ({ slot: 36 + i, hotbarIndex: i, item: null, active: i === 0 })),
+        main: Array.from({ length: 27 }, (_, i) => ({ slot: 9 + i, item: null }))
+      };
+    }
 
-    const items = this.bot.inventory.items().map(item => ({
-      name: item.name,
-      displayName: item.displayName || item.name,
-      count: item.count,
-      slot: item.slot
-    }));
-
-    const slots = this.bot.inventory.slots;
-    const armorSlot = (idx) => {
-      const s = slots[idx];
-      return s ? { name: s.name, displayName: s.displayName || s.name, count: s.count } : null;
+    const slots = this.bot.inventory.slots || [];
+    const formatItem = (item, slotIdx) => {
+      if (!item) return null;
+      return {
+        slot: typeof item.slot === 'number' ? item.slot : slotIdx,
+        id: item.type,
+        name: item.name,
+        displayName: item.displayName || item.name,
+        count: item.count,
+        maxDurability: item.maxDurability ?? null,
+        durabilityUsed: item.durabilityUsed ?? null
+      };
     };
 
+    const items = (this.bot.inventory.items() || []).map(item => formatItem(item, item.slot));
+    const activeHotbarIdx = Number(this.bot.quickBarSlot) || 0;
+
+    const hotbar = [];
+    for (let i = 0; i < 9; i++) {
+      const slotNum = 36 + i;
+      hotbar.push({
+        slot: slotNum,
+        hotbarIndex: i,
+        item: formatItem(slots[slotNum], slotNum),
+        active: i === activeHotbarIdx
+      });
+    }
+
+    const main = [];
+    for (let i = 0; i < 27; i++) {
+      const slotNum = 9 + i;
+      main.push({
+        slot: slotNum,
+        item: formatItem(slots[slotNum], slotNum)
+      });
+    }
+
     const armor = {
-      helmet: armorSlot(5),
-      chestplate: armorSlot(6),
-      leggings: armorSlot(7),
-      boots: armorSlot(8)
+      helmet: formatItem(slots[5], 5),
+      chestplate: formatItem(slots[6], 6),
+      leggings: formatItem(slots[7], 7),
+      boots: formatItem(slots[8], 8)
     };
 
     const held = this.bot.heldItem;
-    const heldItem = held ? { name: held.name, displayName: held.displayName || held.name, count: held.count } : null;
+    const heldItem = formatItem(held, 36 + activeHotbarIdx);
     const off = slots[45];
-    const offhand = off ? { name: off.name, displayName: off.displayName || off.name, count: off.count } : null;
+    const offhand = formatItem(off, 45);
 
-    return { items, armor, heldItem, offhand };
+    return {
+      items,
+      armor,
+      heldItem,
+      offhand,
+      quickBarSlot: activeHotbarIdx,
+      isHoldingRightClick: !!this.isHoldingRightClick,
+      isHoldingLeftClick: !!this.isHoldingLeftClick,
+      hotbar,
+      main
+    };
   }
 
   getOnlinePlayers() {
@@ -1530,6 +1582,8 @@ export class BotManager extends EventEmitter {
   cleanup(isManual = false) {
     this.isRoaming = false;
     this.isEating = false;
+    this.stopRightClickHold();
+    this.stopLeftClickHold();
     this.clearWatchdog();
     this.clearTpaTimeout();
     if (this.antiAfkTimer) {
@@ -1605,18 +1659,279 @@ export class BotManager extends EventEmitter {
     }, delaySec * 1000);
   }
 
+  setQuickBarSlot(slotIndex) {
+    if (!this.bot || !this.hasSpawned()) {
+      throw new Error('Bot is not spawned in a world');
+    }
+    const idx = parseInt(slotIndex, 10);
+    if (isNaN(idx) || idx < 0 || idx > 8) {
+      throw new Error(`Invalid hotbar slot: ${slotIndex}. Must be 0-8.`);
+    }
+    this.bot.setQuickBarSlot(idx);
+    const item = this.bot.heldItem;
+    const itemName = item ? (item.displayName || item.name) : 'Empty Hand';
+    this.emit('log', { type: 'action', text: `Switched hotbar to slot ${idx + 1} (${itemName})` });
+    this.emit('status', this.getStatus());
+    this.emit('inventory', this.getInventory());
+    return { success: true, slot: idx, heldItem: item ? (item.displayName || item.name) : null };
+  }
+
+  startRightClickHold(offHand = false) {
+    if (!this.bot || !this.hasSpawned()) {
+      throw new Error('Bot is not spawned in a world');
+    }
+    if (this.isHoldingRightClick) return { success: true, alreadyHolding: true };
+    this.isHoldingRightClick = true;
+    try {
+      this.bot.activateItem(offHand);
+    } catch (e) {
+      console.warn('[HandAction] Error activating item:', e.message);
+    }
+    const held = offHand ? (this.bot.inventory?.slots?.[45]) : this.bot.heldItem;
+    const label = held ? (held.displayName || held.name) : (offHand ? 'Offhand' : 'Main Hand');
+    this.emit('log', { type: 'action', text: `Started holding Right Click (${label})` });
+    this.emit('status', this.getStatus());
+    this.emit('inventory', this.getInventory());
+    return { success: true, isHoldingRightClick: true };
+  }
+
+  stopRightClickHold() {
+    if (!this.isHoldingRightClick && (!this.bot || !this.bot.usingHeldItem)) {
+      return { success: true, alreadyStopped: true };
+    }
+    this.isHoldingRightClick = false;
+    if (this.bot) {
+      try {
+        this.bot.deactivateItem();
+      } catch (e) {
+        console.warn('[HandAction] Error deactivating item:', e.message);
+      }
+    }
+    this.emit('log', { type: 'action', text: 'Released Right Click' });
+    this.emit('status', this.getStatus());
+    this.emit('inventory', this.getInventory());
+    return { success: true, isHoldingRightClick: false };
+  }
+
+  rightClick(offHand = false) {
+    if (!this.bot || !this.hasSpawned()) {
+      throw new Error('Bot is not spawned in a world');
+    }
+    try {
+      this.bot.activateItem(offHand);
+      setTimeout(() => {
+        if (this.bot && !this.isHoldingRightClick) {
+          try { this.bot.deactivateItem(); } catch (e) {}
+        }
+      }, 150);
+    } catch (e) {
+      console.warn('[HandAction] Right click error:', e.message);
+    }
+    const held = offHand ? (this.bot.inventory?.slots?.[45]) : this.bot.heldItem;
+    const label = held ? (held.displayName || held.name) : 'Hand';
+    this.emit('log', { type: 'action', text: `Right Clicked with ${label}` });
+    return { success: true };
+  }
+
+  leftClick() {
+    if (!this.bot || !this.hasSpawned()) {
+      throw new Error('Bot is not spawned in a world');
+    }
+    try {
+      this.bot.swingArm('right');
+      if (this.bot.nearestEntity) {
+        const target = this.bot.nearestEntity(e => (e.type === 'mob' || e.type === 'player') && e !== this.bot.entity && this.bot.entity.position.distanceTo(e.position) <= 3.5);
+        if (target) {
+          this.bot.attack(target);
+        }
+      }
+    } catch (e) {
+      console.warn('[HandAction] Left click error:', e.message);
+    }
+    this.emit('log', { type: 'action', text: 'Left Click (Punch / Attack)' });
+    return { success: true };
+  }
+
+  startLeftClickHold(intervalMs = 350) {
+    if (!this.bot || !this.hasSpawned()) {
+      throw new Error('Bot is not spawned in a world');
+    }
+    if (this.isHoldingLeftClick) return { success: true, alreadyHolding: true };
+    this.isHoldingLeftClick = true;
+    this.leftClick();
+    this.leftClickInterval = setInterval(() => {
+      if (!this.bot || !this.hasSpawned() || !this.isHoldingLeftClick) {
+        this.stopLeftClickHold();
+        return;
+      }
+      this.leftClick();
+    }, intervalMs);
+
+    this.emit('log', { type: 'action', text: 'Started holding Left Click (Continuous Attack/Swing)' });
+    this.emit('status', this.getStatus());
+    this.emit('inventory', this.getInventory());
+    return { success: true, isHoldingLeftClick: true };
+  }
+
+  stopLeftClickHold() {
+    if (!this.isHoldingLeftClick && !this.leftClickInterval) {
+      return { success: true, alreadyStopped: true };
+    }
+    this.isHoldingLeftClick = false;
+    if (this.leftClickInterval) {
+      clearInterval(this.leftClickInterval);
+      this.leftClickInterval = null;
+    }
+    this.emit('log', { type: 'action', text: 'Released Left Click' });
+    this.emit('status', this.getStatus());
+    this.emit('inventory', this.getInventory());
+    return { success: true, isHoldingLeftClick: false };
+  }
+
+  async dropHeldItem(all = true) {
+    if (!this.bot || !this.hasSpawned()) {
+      throw new Error('Bot is not spawned in a world');
+    }
+    const item = this.bot.heldItem;
+    if (!item) {
+      this.emit('log', { type: 'warn', text: 'Nothing in main hand to drop.' });
+      return { success: false, reason: 'Empty hand' };
+    }
+    const name = item.displayName || item.name;
+    if (all) {
+      await this.bot.tossStack(item);
+      this.emit('log', { type: 'action', text: `Dropped full stack of ${name}` });
+    } else {
+      await this.bot.toss(item.type, null, 1);
+      this.emit('log', { type: 'action', text: `Dropped 1 of ${name}` });
+    }
+    this.emit('status', this.getStatus());
+    this.emit('inventory', this.getInventory());
+    return { success: true };
+  }
+
+  async consumeHeldItem() {
+    if (!this.bot || !this.hasSpawned()) {
+      throw new Error('Bot is not spawned in a world');
+    }
+    const held = this.bot.heldItem;
+    if (!held) {
+      this.emit('log', { type: 'warn', text: 'Cannot consume: main hand is empty.' });
+      return { success: false, reason: 'Empty hand' };
+    }
+    const name = held.displayName || held.name;
+    this.emit('log', { type: 'action', text: `Consuming ${name}...` });
+    try {
+      await this.bot.consume();
+      this.emit('log', { type: 'action', text: `Finished consuming ${name}.` });
+      this.emit('status', this.getStatus());
+      this.emit('inventory', this.getInventory());
+      return { success: true };
+    } catch (e) {
+      this.emit('log', { type: 'warn', text: `Failed consuming ${name}: ${e.message}` });
+      return { success: false, error: e.message };
+    }
+  }
+
+  async swapSlots(sourceSlot, destSlot) {
+    if (!this.bot || !this.hasSpawned()) {
+      throw new Error('Bot is not spawned in a world');
+    }
+    const src = parseInt(sourceSlot, 10);
+    const dst = parseInt(destSlot, 10);
+    if (isNaN(src) || isNaN(dst)) {
+      throw new Error('Invalid slot numbers for swap');
+    }
+    await this.bot.moveSlotItem(src, dst);
+    this.emit('log', { type: 'action', text: `Moved/Swapped item between slot ${src} and slot ${dst}` });
+    this.emit('status', this.getStatus());
+    this.emit('inventory', this.getInventory());
+    return { success: true, sourceSlot: src, destSlot: dst };
+  }
+
+  async dropSlot(slot, count = null) {
+    if (!this.bot || !this.hasSpawned()) {
+      throw new Error('Bot is not spawned in a world');
+    }
+    const s = parseInt(slot, 10);
+    const item = this.bot.inventory?.slots?.[s];
+    if (!item) {
+      throw new Error(`Slot ${s} is empty`);
+    }
+    const name = item.displayName || item.name;
+    if (count === null || count >= item.count) {
+      await this.bot.tossStack(item);
+      this.emit('log', { type: 'action', text: `Dropped all ${item.count}x ${name} from slot ${s}` });
+    } else {
+      await this.bot.toss(item.type, null, count);
+      this.emit('log', { type: 'action', text: `Dropped ${count}x ${name} from slot ${s}` });
+    }
+    this.emit('status', this.getStatus());
+    this.emit('inventory', this.getInventory());
+    return { success: true, slot: s };
+  }
+
+  async equipSlot(slot, destination = 'hand') {
+    if (!this.bot || !this.hasSpawned()) {
+      throw new Error('Bot is not spawned in a world');
+    }
+    const s = parseInt(slot, 10);
+    const item = this.bot.inventory?.slots?.[s];
+    if (!item) {
+      throw new Error(`Slot ${s} is empty`);
+    }
+    await this.bot.equip(item, destination);
+    this.emit('log', { type: 'action', text: `Equipped ${item.displayName || item.name} to ${destination}` });
+    this.emit('status', this.getStatus());
+    this.emit('inventory', this.getInventory());
+    return { success: true, slot: s, destination };
+  }
+
+  async clickWindowSlot(slot, mouseButton = 0, mode = 0) {
+    if (!this.bot || !this.hasSpawned()) {
+      throw new Error('Bot is not spawned in a world');
+    }
+    const s = parseInt(slot, 10);
+    await this.bot.clickWindow(s, mouseButton, mode);
+    this.emit('status', this.getStatus());
+    this.emit('inventory', this.getInventory());
+    return { success: true, slot: s };
+  }
+
   async manualAction(actionType) {
     if (!this.bot || !this.hasSpawned()) {
       throw new Error('Bot is not spawned in a world');
     }
 
-    switch (actionType) {
+    const act = typeof actionType === 'string' ? actionType : (actionType?.action || '');
+    switch (act) {
       case 'eat':
         await this.eatFood();
         break;
       case 'swing':
-        this.bot.swingArm('right');
-        this.emit('log', { type: 'action', text: 'Manual: Swung right arm' });
+      case 'left_click':
+        this.leftClick();
+        break;
+      case 'start_left_click_hold':
+        this.startLeftClickHold();
+        break;
+      case 'stop_left_click_hold':
+        this.stopLeftClickHold();
+        break;
+      case 'right_click':
+        this.rightClick();
+        break;
+      case 'start_right_click_hold':
+        this.startRightClickHold();
+        break;
+      case 'stop_right_click_hold':
+        this.stopRightClickHold();
+        break;
+      case 'drop_held':
+        await this.dropHeldItem(true);
+        break;
+      case 'consume':
+        await this.consumeHeldItem();
         break;
       case 'accept_tpa':
         this.bot.chat('/tpaccept');
@@ -1627,7 +1942,7 @@ export class BotManager extends EventEmitter {
         this.emit('log', { type: 'action', text: 'Manual: Enforced standstill' });
         break;
       default:
-        throw new Error(`Unknown manual action: ${actionType}`);
+        throw new Error(`Unknown manual action: ${act}`);
     }
   }
 }
