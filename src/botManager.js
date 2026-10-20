@@ -543,7 +543,7 @@ export class BotManager extends EventEmitter {
       username,
       auth: 'offline',
       skipValidation: true,
-      checkTimeoutInterval: 90000
+      checkTimeoutInterval: 45000
     };
 
     if (version && version !== 'auto') {
@@ -579,11 +579,27 @@ export class BotManager extends EventEmitter {
       if (currentBot._client) {
         currentBot._client.once('connect', () => {
           this.emit('log', { type: 'system', text: '[CONNECT] TCP socket connection established.' });
+          if (currentBot._client.socket) {
+            try {
+              currentBot._client.socket.setKeepAlive(true, 10000); // Send TCP keepalive probe every 10s
+              currentBot._client.socket.setNoDelay(true); // Disable Nagle algorithm for instant packets
+              this.emit('log', { type: 'system', text: '[NETWORK] TCP keepalive enabled (10s interval) to prevent idle drops.' });
+            } catch (e) {
+              console.warn('[NETWORK] Failed to set TCP keepalive:', e.message);
+            }
+          }
         });
         currentBot._client.on('error', (err) => {
           this.emit('log', { type: 'error', text: `Client network error: ${err.message}` });
         });
       }
+
+      currentBot.on('resourcePack', () => {
+        try {
+          currentBot.acceptResourcePack();
+          this.emit('log', { type: 'system', text: '[SERVER] Auto-accepted server resource pack.' });
+        } catch (e) {}
+      });
 
       this.setupBotEvents(loginPassword, autoLogin);
     } catch (err) {
@@ -1208,7 +1224,13 @@ export class BotManager extends EventEmitter {
 
     bot.on('spawn', () => {
       this.spawnTime = Date.now();
-      this.reconnectAttempts = 0; // Reset reconnection counter upon successful join
+
+      // Reset reconnect counter only after remaining connected for 15s
+      setTimeout(() => {
+        if (this.hasSpawned() && this.bot === bot) {
+          this.reconnectAttempts = 0;
+        }
+      }, 15000);
 
       this.transitionTo(STATES.JOINED, 'Bot spawned in world');
 
@@ -1223,12 +1245,30 @@ export class BotManager extends EventEmitter {
         }, 1500);
       }
 
-      // Transition from JOINED to WAITING_FOR_TPA after initial join stabilization
+      // Check if we were already at the farm before disconnect
       setTimeout(() => {
-        if (this.state === STATES.JOINED && this.bot) {
-          this.transitionTo(STATES.WAITING_FOR_TPA, 'Ready to receive teleport request');
+        if (!this.bot || this.state !== STATES.JOINED) return;
+
+        if (this.farmLocation && this.bot.entity?.position) {
+          const currentPos = this.bot.entity.position;
+          const farmPos = this.farmLocation;
+          const dist = Math.hypot(
+            currentPos.x - farmPos.x,
+            currentPos.y - farmPos.y,
+            currentPos.z - farmPos.z
+          );
+          if (dist <= 25) {
+            this.emit('log', {
+              type: 'system',
+              text: `[Farm Auto-Resume] Reconnected at farm (${currentPos.x.toFixed(1)}, ${currentPos.y.toFixed(1)}, ${currentPos.z.toFixed(1)}). Resuming AFK stillness!`
+            });
+            this.confirmTeleport('Auto-resumed farm position after reconnect');
+            return;
+          }
         }
-      }, 2000);
+
+        this.transitionTo(STATES.WAITING_FOR_TPA, 'Ready to receive teleport request');
+      }, 2500);
 
       this.resetAntiAfkTimer();
     });
@@ -1297,18 +1337,28 @@ export class BotManager extends EventEmitter {
         kickReason = String(reason);
       }
 
-      if (this.state === STATES.AFK) {
+      const lower = kickReason.toLowerCase();
+      let customDelay = null;
+      if (lower.includes('already logged in') || lower.includes('already connected') || lower.includes('another location') || lower.includes('logged in from')) {
+        customDelay = 22; // Wait 22s for ghost session to expire on server
+        this.emit('log', { type: 'warn', text: `[SERVER] Ghost session detected (${kickReason}). Waiting 22s for server cleanup before reconnecting...` });
+      } else if (this.state === STATES.AFK) {
         this.emit('log', { type: 'warn', text: `[AFK] Connection lost (kicked: ${kickReason}). Preparing recovery...` });
       } else {
         this.emit('log', { type: 'warn', text: `[CONNECT] Bot was kicked: ${kickReason}` });
       }
 
       this.cleanup(false);
-      this.scheduleReconnect();
+      this.scheduleReconnect(customDelay);
     });
 
     bot.on('end', (reason) => {
       const endReason = reason || 'Connection closed';
+      let customDelay = null;
+      if (endReason === 'socketClosed') {
+        customDelay = 16; // Wait 16s for server to cleanly despawn player
+      }
+
       if (this.state === STATES.AFK) {
         this.emit('log', { type: 'warn', text: `[AFK] Connection lost (${endReason}). Preparing recovery...` });
       } else {
@@ -1316,7 +1366,7 @@ export class BotManager extends EventEmitter {
       }
 
       this.cleanup(false);
-      this.scheduleReconnect();
+      this.scheduleReconnect(customDelay);
     });
 
     bot.on('error', (err) => {
@@ -1615,13 +1665,18 @@ export class BotManager extends EventEmitter {
   /**
    * Controlled reconnection with backoff and maximum retry limit
    */
-  scheduleReconnect() {
+  scheduleReconnect(customDelay = null) {
     if (this.manualDisconnect) {
       this.transitionTo(STATES.DISCONNECTED, 'Manual disconnect');
       return;
     }
     if (!this.settings.autoReconnect || !this.currentServer) {
       this.transitionTo(STATES.DISCONNECTED, 'Auto-reconnect disabled');
+      return;
+    }
+
+    // Deduplicate: ignore duplicate triggers while a reconnection timer is already running
+    if (this.reconnectTimer) {
       return;
     }
 
@@ -1639,9 +1694,9 @@ export class BotManager extends EventEmitter {
       return;
     }
 
-    const baseDelaySec = Math.max(5, this.settings.autoReconnectDelaySec || 10);
+    const baseDelaySec = customDelay || Math.max(12, this.settings.autoReconnectDelaySec || 12);
     // Backoff factor capped at 60s
-    const backoffFactor = Math.min(5, Math.pow(1.2, this.reconnectAttempts - 1));
+    const backoffFactor = Math.min(4, Math.pow(1.15, this.reconnectAttempts - 1));
     const delaySec = Math.min(60, Math.round(baseDelaySec * backoffFactor));
 
     this.transitionTo(STATES.RECONNECTING, `Attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}`);
@@ -1650,7 +1705,6 @@ export class BotManager extends EventEmitter {
       text: `[RECONNECTING] Attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${delaySec}s...`
     });
 
-    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       if (!this.manualDisconnect && this.currentServer) {
