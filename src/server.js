@@ -357,7 +357,7 @@ app.post('/api/shop/analyze', async (req, res) => {
       }
     }
 
-    const markdownReport = generateMarkdownReport(analysis, aiStrategy);
+    const markdownReport = generateMarkdownReport(analysis, aiStrategy?.text || aiStrategy);
     const aiPrompt = generateAiPrompt(catalog, analysis);
 
     res.json({
@@ -550,41 +550,54 @@ app.delete('/api/permitted-users/:username', (req, res) => {
   }
 });
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`===============================================`);
-  console.log(` Minecraft AFK Bot Dashboard running!`);
-  console.log(` Web UI: http://0.0.0.0:${PORT}`);
-  console.log(`===============================================`);
+const startServer = (port) => {
+  const listener = server.listen(port, '0.0.0.0', () => {
+    console.log(`===============================================`);
+    console.log(` Minecraft AFK Bot Dashboard running!`);
+    console.log(` Web UI: http://localhost:${port}`);
+    console.log(`===============================================`);
 
-  // Auto-connect on startup only if MC_HOST is explicitly defined in environment or a saved server exists
-  const envHost = (process.env.MC_HOST || '').trim();
-  const savedServers = storage.getSavedServers();
-  const shouldAutoConnect = process.env.AUTO_CONNECT === 'true' && (envHost || savedServers.length > 0);
+    // Auto-connect on startup only if MC_HOST is explicitly defined in environment or a saved server exists
+    const envHost = (process.env.MC_HOST || '').trim();
+    const savedServers = storage.getSavedServers();
+    const shouldAutoConnect = process.env.AUTO_CONNECT === 'true' && (envHost || savedServers.length > 0);
 
-  if (shouldAutoConnect) {
-    const saved = savedServers[0] || {};
-    const targetHost = envHost || saved.host;
-    if (targetHost) {
-      let finalHost = targetHost;
-      let finalPort = parseInt(process.env.MC_PORT || saved.port || '25565', 10);
-      if (finalHost.includes(':')) {
-        const [h, p] = finalHost.split(':');
-        finalHost = h.trim();
-        const parsed = parseInt(p, 10);
-        if (!isNaN(parsed) && parsed > 0) finalPort = parsed;
+    if (shouldAutoConnect) {
+      const saved = savedServers[0] || {};
+      const targetHost = envHost || saved.host;
+      if (targetHost) {
+        let finalHost = targetHost;
+        let finalPort = parseInt(process.env.MC_PORT || saved.port || '25565', 10);
+        if (finalHost.includes(':')) {
+          const [h, p] = finalHost.split(':');
+          finalHost = h.trim();
+          const parsed = parseInt(p, 10);
+          if (!isNaN(parsed) && parsed > 0) finalPort = parsed;
+        }
+        const target = {
+          host: finalHost,
+          port: finalPort,
+          username: process.env.MC_USERNAME || saved.username || 'Aaswaam',
+          loginPassword: process.env.MC_PASSWORD || saved.loginPassword || '209801',
+          version: process.env.MC_VERSION || saved.version || '1.21.4',
+          autoLogin: process.env.MC_AUTOLOGIN !== 'false'
+        };
+        console.log(`[AutoConnect] Initiating auto-connect to ${target.host}:${target.port} as ${target.username}...`);
+        setTimeout(() => {
+          botManager.connect(target);
+        }, 2500);
       }
-      const target = {
-        host: finalHost,
-        port: finalPort,
-        username: process.env.MC_USERNAME || saved.username || 'Aaswaam',
-        loginPassword: process.env.MC_PASSWORD || saved.loginPassword || '209801',
-        version: process.env.MC_VERSION || saved.version || '1.21.4',
-        autoLogin: process.env.MC_AUTOLOGIN !== 'false'
-      };
-      console.log(`[AutoConnect] Initiating auto-connect to ${target.host}:${target.port} as ${target.username}...`);
-      setTimeout(() => {
-        botManager.connect(target);
-      }, 2500);
     }
-  }
-});
+  });
+
+  listener.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.warn(`[Server] Port ${port} is in use, trying port ${port + 1}...`);
+      startServer(port + 1);
+    } else {
+      console.error('[Server Error]', err);
+    }
+  });
+};
+
+startServer(PORT);

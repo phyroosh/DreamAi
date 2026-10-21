@@ -354,8 +354,9 @@ export function generateMarkdownReport(analysis, aiResponse = null) {
   }
 
   if (aiResponse) {
+    const aiText = typeof aiResponse === 'object' ? (aiResponse.text || JSON.stringify(aiResponse, null, 2)) : String(aiResponse);
     md += `## 🧠 Strategic AI Wealth Roadmap\n\n`;
-    md += `${aiResponse}\n\n`;
+    md += `${aiText}\n\n`;
   }
 
   return md;

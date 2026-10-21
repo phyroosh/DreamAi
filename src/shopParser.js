@@ -1,108 +1,185 @@
 import nbt from 'prismarine-nbt';
 
 /**
- * Strips Minecraft formatting codes (§ and &) and normalizes whitespace
+ * Recursively extracts plain text from Minecraft strings, JSON strings, or chat component objects
  */
-export function stripFormatting(text) {
-  if (!text) return '';
-  if (typeof text !== 'string') text = String(text);
-  
-  // Try parsing JSON chat component if formatted as JSON
-  if (text.startsWith('{') && text.endsWith('}')) {
-    try {
-      const parsed = JSON.parse(text);
-      text = extractChatComponentText(parsed);
-    } catch {
-      // Not JSON, continue with normal string
+export function extractRawText(obj) {
+  if (obj === null || obj === undefined) return '';
+
+  if (typeof obj === 'string') {
+    const trimmed = obj.trim();
+    if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        return extractRawText(parsed);
+      } catch {
+        // Not valid JSON, keep as raw string
+      }
     }
+    return obj;
   }
 
-  return text
+  if (typeof obj === 'number' || typeof obj === 'boolean') {
+    return String(obj);
+  }
+
+  if (Array.isArray(obj)) {
+    return obj.map(extractRawText).filter(Boolean).join('');
+  }
+
+  if (typeof obj === 'object') {
+    let result = '';
+    if (obj.text) result += extractRawText(obj.text);
+    if (obj.value) result += extractRawText(obj.value);
+    if (obj.extra) result += extractRawText(obj.extra);
+    if (obj.translate) {
+      if (!String(obj.translate).startsWith('chat.type.')) {
+        result += `[${obj.translate}] `;
+      }
+    }
+    if (obj.with) result += extractRawText(obj.with);
+    return result || '';
+  }
+
+  return '';
+}
+
+export const extractChatComponentText = extractRawText;
+
+/**
+ * Strips Minecraft formatting codes (§ and &) and normalizes whitespace
+ */
+export function stripFormatting(input) {
+  if (input === null || input === undefined) return '';
+  const rawText = extractRawText(input);
+  return rawText
     .replace(/[§&][0-9a-fk-orA-FK-OR]/g, '') // Minecraft color & format codes
     .replace(/\u00A7[0-9a-fk-orA-FK-OR]/g, '')
     .trim();
 }
 
 /**
- * Recursively extracts plain text from Minecraft JSON text components
+ * Extracts clean display name from an item across Minecraft 1.8 to 1.21.4+
  */
-export function extractChatComponentText(component) {
-  if (!component) return '';
-  if (typeof component === 'string') return component;
-  if (typeof component === 'number') return String(component);
+export function extractDisplayName(item) {
+  if (!item) return '';
 
-  let result = component.text || '';
-  if (Array.isArray(component.extra)) {
-    for (const extra of component.extra) {
-      result += extractChatComponentText(extra);
+  // 1. Check customName getter / property
+  if (item.customName) {
+    const txt = stripFormatting(item.customName);
+    if (txt) return txt;
+  }
+
+  // 2. Check 1.20.5+ / 1.21.4 componentMap
+  if (item.componentMap?.has('custom_name')) {
+    const txt = stripFormatting(item.componentMap.get('custom_name')?.data);
+    if (txt) return txt;
+  }
+  if (item.componentMap?.has('item_name')) {
+    const txt = stripFormatting(item.componentMap.get('item_name')?.data);
+    if (txt) return txt;
+  }
+
+  // 3. Check components array
+  if (Array.isArray(item.components)) {
+    const nameComp = item.components.find(c => c && (c.type === 'custom_name' || c.name === 'custom_name' || c.type === 'minecraft:custom_name'));
+    if (nameComp?.data) {
+      const txt = stripFormatting(nameComp.data);
+      if (txt) return txt;
     }
   }
-  return result;
+
+  // 4. Fallback to NBT display Name
+  if (item.nbt) {
+    try {
+      const simplified = nbt.simplify(item.nbt);
+      if (simplified?.display?.Name) {
+        const txt = stripFormatting(simplified.display.Name);
+        if (txt) return txt;
+      }
+    } catch {}
+
+    try {
+      const rawName = item.nbt?.value?.display?.value?.Name?.value;
+      if (rawName) {
+        const txt = stripFormatting(rawName);
+        if (txt) return txt;
+      }
+    } catch {}
+  }
+
+  return stripFormatting(item.displayName || item.name || '');
 }
 
 /**
- * Extracts lore array from a prismarine-item
+ * Extracts lore array from an item across Minecraft 1.8 to 1.21.4+
  */
 export function extractLore(item) {
   if (!item) return [];
 
+  const rawLines = [];
+
   // 1. Direct customLore property if provided by prismarine-item
   if (item.customLore) {
     if (Array.isArray(item.customLore)) {
-      return item.customLore.map(line => stripFormatting(line)).filter(Boolean);
-    }
-    if (typeof item.customLore === 'string') {
-      return [stripFormatting(item.customLore)].filter(Boolean);
+      rawLines.push(...item.customLore);
+    } else {
+      rawLines.push(item.customLore);
     }
   }
 
-  // 2. Extract from NBT compound
+  // 2. Component map in 1.20.5+ / 1.21.4
+  if (item.componentMap?.has('lore')) {
+    const loreData = item.componentMap.get('lore')?.data;
+    if (Array.isArray(loreData)) {
+      rawLines.push(...loreData);
+    } else if (loreData) {
+      rawLines.push(loreData);
+    }
+  }
+
+  // 3. Components array check
+  if (Array.isArray(item.components)) {
+    const loreComp = item.components.find(c => c && (c.type === 'lore' || c.name === 'lore' || c.type === 'minecraft:lore'));
+    if (loreComp?.data) {
+      if (Array.isArray(loreComp.data)) {
+        rawLines.push(...loreComp.data);
+      } else {
+        rawLines.push(loreComp.data);
+      }
+    }
+  }
+
+  // 4. Extract from NBT compound
   if (item.nbt) {
     try {
       const simplified = nbt.simplify(item.nbt);
       const display = simplified?.display;
       if (display?.Lore && Array.isArray(display.Lore)) {
-        return display.Lore.map(line => stripFormatting(line)).filter(Boolean);
+        rawLines.push(...display.Lore);
       }
-    } catch {
-      // Fallback to checking raw nbt if simplify fails
-    }
+    } catch {}
 
     try {
       const rawLore = item.nbt?.value?.display?.value?.Lore?.value?.value;
       if (Array.isArray(rawLore)) {
-        return rawLore.map(line => stripFormatting(line)).filter(Boolean);
+        rawLines.push(...rawLore);
       }
-    } catch {
-      // ignore
+    } catch {}
+  }
+
+  // Strip formatting from every line and deduplicate
+  const cleaned = [];
+  const seen = new Set();
+  for (const raw of rawLines) {
+    const txt = stripFormatting(raw);
+    if (txt && !seen.has(txt)) {
+      seen.add(txt);
+      cleaned.push(txt);
     }
   }
 
-  return [];
-}
-
-/**
- * Extracts clean display name from an item
- */
-export function extractDisplayName(item) {
-  if (!item) return '';
-
-  if (item.customName) {
-    return stripFormatting(item.customName);
-  }
-
-  if (item.nbt) {
-    try {
-      const simplified = nbt.simplify(item.nbt);
-      if (simplified?.display?.Name) {
-        return stripFormatting(simplified.display.Name);
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  return stripFormatting(item.displayName || item.name || '');
+  return cleaned;
 }
 
 /**
@@ -148,13 +225,14 @@ export function parsePricesFromLore(rawLoreLines = [], displayName = '') {
   // Check for unbuyable indicators
   const isUnbuyable = /cannot be bought|not for sale|unbuyable|cannot buy/i.test(fullText);
 
-  for (const cleanLine of loreLines) {
+  for (let i = 0; i < loreLines.length; i++) {
+    const cleanLine = loreLines[i];
     const lower = cleanLine.toLowerCase();
 
     // 1. Check Buy Price Patterns
-    // Examples: "Buy: $15.00", "Buy 1 for $10", "Buy 1x: $10", "Price: $50", "Cost: $50"
+    // Examples: "Buy: $15.00", "Buy Price" -> "■ $10.00", "Buy 1 for $10", "Buy 1x: $10", "Price: $50"
     if (!isUnbuyable && (lower.includes('buy') || lower.includes('cost') || lower.includes('purchase'))) {
-      // Buy 64x pattern: "Buy 64x: $640" or "Buy 64 for: $640"
+      // Same-line buy 64x pattern: "Buy 64x: $640" or "Buy 64 for: $640"
       const stackMatch = cleanLine.match(/buy\s*(?:for\s*)?(\d+)[x\s]+(?:for|:)?\s*[$€£]?\s*([0-9,]+(?:\.[0-9]+)?[km]?)/i);
       if (stackMatch) {
         const qty = parseInt(stackMatch[1], 10);
@@ -165,22 +243,38 @@ export function parsePricesFromLore(rawLoreLines = [], displayName = '') {
           unit = 1;
         }
       } else {
-        // Standard single item buy: "Buy: $10.00", "Buy 1: $10", "Buy Price: $10"
+        // Standard single item buy on same line: "Buy: $10.00", "Buy 1: $10", "Buy Price: $10"
         const singleMatch = cleanLine.match(/(?:buy|cost|purchase)(?:\s*(?:price|1x|1|each|per\s*item))?\s*[:\-]?\s*[$€£]?\s*([0-9,]+(?:\.[0-9]+)?[km]?)/i);
         if (singleMatch) {
           const val = parsePriceValue(singleMatch[1]);
-          if (val !== null && buyPrice === null) {
+          if (val !== null) {
             buyPrice = val;
             canBuy = true;
+          }
+        }
+      }
+
+      // Check multi-line pattern ONLY if same line did not contain a price
+      if (buyPrice === null && i + 1 < loreLines.length) {
+        const nextLine = loreLines[i + 1];
+        if (!/^(?:sell|usage|click|lore|description)/i.test(nextLine)) {
+          const nextMatch = nextLine.match(/[$€£]\s*([0-9,]+(?:\.[0-9]+)?[km]?)/i) ||
+                            nextLine.match(/^[■•\-*\s]*[$€£]?\s*([0-9,]+(?:\.[0-9]+)?[km]?)/i);
+          if (nextMatch) {
+            const val = parsePriceValue(nextMatch[1]);
+            if (val !== null) {
+              buyPrice = val;
+              canBuy = true;
+            }
           }
         }
       }
     }
 
     // 2. Check Sell Price Patterns
-    // Examples: "Sell: $2.50", "Sell 1 for $3", "Sell 1x: $3", "Payout: $2.50"
+    // Examples: "Sell: $2.50", "Sell Price" -> "■ $5.00", "Sell 1 for $3", "Sell 1x: $3", "Payout: $2.50"
     if (!isUnsellable && (lower.includes('sell') || lower.includes('payout'))) {
-      // Sell 64x pattern: "Sell 64x: $160" or "Sell 64 for: $160"
+      // Same-line sell 64x pattern: "Sell 64x: $160" or "Sell 64 for: $160"
       const stackMatch = cleanLine.match(/sell\s*(?:for\s*)?(\d+)[x\s]+(?:for|:)?\s*[$€£]?\s*([0-9,]+(?:\.[0-9]+)?[km]?)/i);
       if (stackMatch) {
         const qty = parseInt(stackMatch[1], 10);
@@ -190,13 +284,29 @@ export function parsePricesFromLore(rawLoreLines = [], displayName = '') {
           canSell = true;
         }
       } else {
-        // Standard single item sell: "Sell: $2.50", "Sell 1: $2.50", "Sell Price: $2.50"
+        // Standard single item sell on same line: "Sell: $2.50", "Sell 1: $2.50", "Sell Price: $2.50"
         const singleMatch = cleanLine.match(/(?:sell|payout)(?:\s*(?:price|1x|1|each|per\s*item))?\s*[:\-]?\s*[$€£]?\s*([0-9,]+(?:\.[0-9]+)?[km]?)/i);
         if (singleMatch) {
           const val = parsePriceValue(singleMatch[1]);
-          if (val !== null && sellPrice === null) {
+          if (val !== null) {
             sellPrice = val;
             canSell = true;
+          }
+        }
+      }
+
+      // Check multi-line pattern ONLY if same line did not contain a price
+      if (sellPrice === null && i + 1 < loreLines.length) {
+        const nextLine = loreLines[i + 1];
+        if (!/^(?:buy|usage|click|lore|description)/i.test(nextLine)) {
+          const nextMatch = nextLine.match(/[$€£]\s*([0-9,]+(?:\.[0-9]+)?[km]?)/i) ||
+                            nextLine.match(/^[■•\-*\s]*[$€£]?\s*([0-9,]+(?:\.[0-9]+)?[km]?)/i);
+          if (nextMatch) {
+            const val = parsePriceValue(nextMatch[1]);
+            if (val !== null) {
+              sellPrice = val;
+              canSell = true;
+            }
           }
         }
       }
@@ -336,7 +446,7 @@ export function classifyItem(item, slotIndex, windowTitle = '') {
   }
 
   // 4. Check for Category folder (clicking opens category items)
-  // Usually in root shop, items like "Farming", "Blocks", "Ores" have lore like "Click to view", "Browse items"
+  // In root shop menu, any item that is not a filler or navigation is a category!
   const isCategoryIndicator =
     loreText.includes('click to') ||
     loreText.includes('view') ||
@@ -344,7 +454,8 @@ export function classifyItem(item, slotIndex, windowTitle = '') {
     loreText.includes('category') ||
     loreText.includes('section') ||
     loreText.includes('open') ||
-    lore.length > 0;
+    lore.length > 0 ||
+    (!lowerName.includes('glass') && displayName && displayName !== ' ');
 
   return {
     type: isCategoryIndicator ? 'category' : 'unknown',

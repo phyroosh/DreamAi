@@ -10,7 +10,6 @@ export class ShopCrawler extends EventEmitter {
     this.timeoutMs = options.timeout || 5000;
     this.isCrawling = false;
     this.shouldStop = false;
-    this.activeWindow = null;
     this.visitedWindows = new Set();
   }
 
@@ -19,7 +18,7 @@ export class ShopCrawler extends EventEmitter {
    */
   async sleep(ms) {
     const jitter = Math.floor(Math.random() * (ms * 0.3)) - Math.floor(ms * 0.15);
-    const finalDelay = Math.max(400, ms + jitter);
+    const finalDelay = Math.max(200, ms + jitter);
     return new Promise(resolve => setTimeout(resolve, finalDelay));
   }
 
@@ -41,39 +40,8 @@ export class ShopCrawler extends EventEmitter {
   }
 
   /**
-   * Waits for a windowOpen event or an update to the current window
+   * Helper to get upper chest/menu slot count
    */
-  waitForWindowChange(timeoutMs = this.timeoutMs) {
-    const bot = this.botManager?.bot;
-    if (!bot) return Promise.reject(new Error('Bot is not active'));
-
-    return new Promise((resolve, reject) => {
-      let resolved = false;
-
-      const timer = setTimeout(() => {
-        if (!resolved) {
-          cleanup();
-          resolve(bot.currentWindow || null);
-        }
-      }, timeoutMs);
-
-      const onWindowOpen = (window) => {
-        if (!resolved) {
-          resolved = true;
-          cleanup();
-          resolve(window);
-        }
-      };
-
-      const cleanup = () => {
-        clearTimeout(timer);
-        bot.removeListener('windowOpen', onWindowOpen);
-      };
-
-      bot.once('windowOpen', onWindowOpen);
-    });
-  }
-
   getUpperSlotCount(window) {
     if (!window || !window.slots) return 0;
     if (window.inventoryStart != null) return window.inventoryStart;
@@ -82,7 +50,39 @@ export class ShopCrawler extends EventEmitter {
   }
 
   /**
+   * Generates a signature of items on the page to detect if a page actually changed
+   */
+  getPageSignature(window, upperSlotCount) {
+    if (!window || !window.slots) return '';
+    const signatures = [];
+    for (let s = 0; s < upperSlotCount; s++) {
+      const itm = window.slots[s];
+      if (itm) signatures.push(`${s}:${itm.name}:${itm.count}`);
+    }
+    return signatures.join('|');
+  }
+
+  /**
+   * Waits for a window to have loaded items
+   */
+  async waitForWindowItems(bot, prevWindowId = null, timeoutMs = 3500) {
+    const startTime = Date.now();
+    while (Date.now() - startTime < timeoutMs) {
+      const win = bot?.currentWindow;
+      if (win && win.slots && win.slots.some(item => item !== null && item !== undefined)) {
+        if (prevWindowId == null || win.id !== prevWindowId) {
+          return win;
+        }
+      }
+      await new Promise(r => setTimeout(r, 80));
+    }
+    return bot?.currentWindow || null;
+  }
+
+  /**
    * Starts scraping the shop
+   * STRICT SAFETY RULE: Shop crawler NEVER automatically starts on server join or spawn.
+   * It is strictly user-invoked via UI click (btnStartCrawl) or explicit API request.
    */
   async startCrawl(customCommand = null) {
     if (this.isCrawling) {
@@ -122,17 +122,15 @@ export class ShopCrawler extends EventEmitter {
     };
 
     try {
+      if (bot.currentWindow) {
+        try { bot.closeWindow(bot.currentWindow); } catch {}
+        await this.sleep(400);
+      }
       emitProgress('Opening Shop', `Executing ${cmd}...`, 5);
       bot.chat(cmd);
 
-      // Wait for shop window to open
-      await this.sleep(Math.min(this.baseDelay, 1200));
-      let window = bot.currentWindow;
-
-      if (!window) {
-        // If window hasn't opened yet, wait for windowOpen event
-        window = await this.waitForWindowChange(Math.max(200, this.timeoutMs));
-      }
+      // Wait for shop window to open and populate items
+      let window = await this.waitForWindowItems(bot, null, 6000);
 
       if (!window || !window.slots) {
         throw new Error(`Shop GUI did not open for ${cmd}. Check if the server uses a different command like /store, /market, or /gui shop.`);
@@ -143,7 +141,6 @@ export class ShopCrawler extends EventEmitter {
 
       // Inspect root window slots
       const upperSlotCount = this.getUpperSlotCount(window);
-
       const rootCategories = [];
       const rootShopItems = [];
 
@@ -164,7 +161,7 @@ export class ShopCrawler extends EventEmitter {
         }
       }
 
-      // If the shop doesn't have category sub-menus and directly contains items
+      // If the shop directly contains items in root menu
       if (rootShopItems.length > 0) {
         catalog.items.push(...rootShopItems);
         catalog.categories.push({
@@ -173,23 +170,26 @@ export class ShopCrawler extends EventEmitter {
         });
       }
 
-      emitProgress('Categories Discovered', `Found ${rootCategories.length} categories to explore`, 20);
+      const catNames = rootCategories.map(c => c.displayName).join(', ');
+      emitProgress('Categories Discovered', `Found ${rootCategories.length} categories to explore: ${catNames || 'None'}`, 20);
 
       // Traverse each category sub-menu
       for (let cIdx = 0; cIdx < rootCategories.length; cIdx++) {
         if (this.shouldStop) break;
 
         const cat = rootCategories[cIdx];
-        const catPercent = 20 + Math.floor(((cIdx) / rootCategories.length) * 70);
+        const catPercent = 20 + Math.floor(((cIdx) / Math.max(1, rootCategories.length)) * 70);
         emitProgress('Exploring Category', `[${cIdx + 1}/${rootCategories.length}] ${cat.displayName}`, catPercent);
 
-        // Click into category
-        await this.sleep(this.baseDelay);
+        // Ensure we have an open window before clicking
         if (!bot.currentWindow) {
           bot.chat(cmd);
-          await this.sleep(1000);
+          window = await this.waitForWindowItems(bot, null, 3000);
         }
 
+        const prevWindowId = bot.currentWindow?.id;
+
+        await this.sleep(this.baseDelay);
         try {
           await bot.clickWindow(cat.slot, 0, 0);
         } catch (err) {
@@ -197,13 +197,14 @@ export class ShopCrawler extends EventEmitter {
           continue;
         }
 
-        await this.sleep(this.baseDelay);
-        window = bot.currentWindow;
+        // Wait for sub-menu to populate
+        await this.sleep(Math.min(this.baseDelay, 1000));
+        window = await this.waitForWindowItems(bot, prevWindowId, 3000);
         if (!window) continue;
 
         const catTitle = stripFormatting(window.title || cat.displayName);
         const categoryData = {
-          name: catTitle,
+          name: catTitle || cat.displayName,
           categoryIcon: cat.name,
           items: []
         };
@@ -214,7 +215,9 @@ export class ShopCrawler extends EventEmitter {
         const visitedPages = new Set();
 
         while (hasNextPage && !this.shouldStop) {
+          if (!window || !window.slots) break;
           const currentUpperSlots = this.getUpperSlotCount(window);
+          const currentSignature = this.getPageSignature(window, currentUpperSlots);
           let nextPageSlot = null;
           let backSlot = null;
 
@@ -238,9 +241,21 @@ export class ShopCrawler extends EventEmitter {
             emitProgress('Next Page', `${cat.displayName} (Page ${pageNum + 1})`, catPercent);
             await this.sleep(this.baseDelay);
             try {
+              const prevPageWindowId = bot.currentWindow?.id;
               await bot.clickWindow(nextPageSlot, 0, 0);
               await this.sleep(this.baseDelay);
-              window = bot.currentWindow;
+              const nextWin = await this.waitForWindowItems(bot, prevPageWindowId, 2500);
+              if (!nextWin || !nextWin.slots) {
+                hasNextPage = false;
+                break;
+              }
+              const newSignature = this.getPageSignature(nextWin, this.getUpperSlotCount(nextWin));
+              if (newSignature === currentSignature) {
+                // Page contents did not change; reached last page
+                hasNextPage = false;
+                break;
+              }
+              window = nextWin;
               pageNum++;
             } catch {
               hasNextPage = false;
@@ -251,37 +266,52 @@ export class ShopCrawler extends EventEmitter {
         }
 
         catalog.categories.push(categoryData);
+        emitProgress('Category Scanned', `${cat.displayName}: found ${categoryData.items.length} items`, catPercent);
 
-        // Click back button to return to root menu
+        if (categoryData.items.length === 0 && window && window.slots) {
+          const slotNames = window.slots
+            .slice(0, this.getUpperSlotCount(window))
+            .filter(Boolean)
+            .map(i => `${i.name}("${classifyItem(i, 0).displayName}")`)
+            .slice(0, 10)
+            .join(', ');
+          this.botManager.emit('log', {
+            type: 'system',
+            text: `[Shop Crawler Debug] Category "${cat.displayName}" had 0 shop items. Sample slots: [${slotNames}]`
+          });
+        }
+
+        // Return to root menu
         if (bot.currentWindow && !this.shouldStop) {
-          const currentUpperSlots = this.getUpperSlotCount(window);
-          let backSlot = null;
-          for (let s = 0; s < currentUpperSlots; s++) {
-            const itm = window.slots[s];
-            if (!itm) continue;
-            const c = classifyItem(itm, s, catTitle);
-            if (c.type === 'navigation' && (c.action === 'back' || c.action === 'close')) {
-              backSlot = s;
-              break;
+          window = bot.currentWindow;
+          if (window && window.slots) {
+            const currentUpperSlots = this.getUpperSlotCount(window);
+            let backSlot = null;
+            for (let s = 0; s < currentUpperSlots; s++) {
+              const itm = window.slots[s];
+              if (!itm) continue;
+              const c = classifyItem(itm, s, catTitle);
+              if (c.type === 'navigation' && (c.action === 'back' || c.action === 'close')) {
+                backSlot = s;
+                break;
+              }
             }
-          }
 
-          if (backSlot !== null) {
-            await this.sleep(this.baseDelay);
-            try {
-              await bot.clickWindow(backSlot, 0, 0);
+            if (backSlot !== null) {
               await this.sleep(this.baseDelay);
-            } catch {
-              // ignore
+              try {
+                await bot.clickWindow(backSlot, 0, 0);
+                await this.sleep(this.baseDelay);
+              } catch {}
+            } else {
+              // Re-open /shop if no explicit back button was found
+              try {
+                bot.closeWindow(bot.currentWindow);
+              } catch {}
+              await this.sleep(this.baseDelay);
+              bot.chat(cmd);
+              await this.waitForWindowItems(bot, null, 2500);
             }
-          } else {
-            // Re-open /shop if no explicit back button was found
-            try {
-              bot.closeWindow(bot.currentWindow);
-            } catch {}
-            await this.sleep(this.baseDelay);
-            bot.chat(cmd);
-            await this.sleep(1200);
           }
         }
       }
