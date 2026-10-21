@@ -529,9 +529,11 @@ export function classifyItem(item, slotIndex, windowTitle = '') {
   // 3. Check for shop item prices and trade indicators
   const priceInfo = parsePricesFromLore(lore, displayName);
   if (priceInfo.canBuy || priceInfo.canSell || priceInfo.isTradeItem) {
+    const catName = stripFormatting(windowTitle || '');
     return {
       type: 'shop_item',
       slot: slotIndex,
+      category: catName || 'Unknown',
       id: item.type,
       name,
       displayName,

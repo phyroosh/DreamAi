@@ -40,9 +40,9 @@ describe('Economy Analyzer - Arbitrage & ROI Intelligence', () => {
   test('2. Ranks passive AFK crops by hourly profit', () => {
     const analysis = analyzeEconomy(mockCatalog);
     assert.ok(analysis.passiveFarmRankings.length >= 3);
-    // Cactus: 100 * 5 = 500, Sugar cane: 100 * 3 = 300, Pumpkin: 150 * 2 = 300
+    // Cactus: 100 plants * 3.33 blocks/hr * 0.80 efficiency * $5 = $1,332/hr
     assert.equal(analysis.passiveFarmRankings[0].crop, 'Cactus');
-    assert.equal(analysis.passiveFarmRankings[0].estHourlyProfitPer100Plots, 500);
+    assert.equal(analysis.passiveFarmRankings[0].estHourlyProfitPer100Plots, 1332);
   });
 
   test('3. Computes Spawner payback break-even time', () => {

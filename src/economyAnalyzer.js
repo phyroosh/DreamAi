@@ -1,55 +1,37 @@
 /**
- * Economy and Arbitrage Analyzer
- * Analyzes scraped Minecraft shop catalogs to find:
- * - Infinite crafting arbitrage (crafting loops with profit)
- * - Passive AFK farm ROI (Cactus, Sugar Cane, Bamboo, Pumpkins)
- * - Active crop farming profits
- * - Spawner break-even timelines
- * - Full AI-powered Wealth Roadmap
+ * Economy & Arbitrage Intelligence Engine
+ * 
+ * Conducts transparent, auditable economic analysis across:
+ * - Data model normalization & mathematical listing count reconciliation (Phase 1 & 2)
+ * - True full-inventory and harvest crop economics (Phase 3)
+ * - Reliable passive AFK farm modeling with documented growth mechanics (Phase 4)
+ * - Deduplicated unique item rankings and investment payback (Phase 5)
+ * - Systematic arbitrage and conversion auditor (Phase 6 & 7)
+ * - Auditable strategic reports and AI prompts (Phase 9)
  */
 
-// Common crafting recipes: inputs -> { resultCount, inputs: { itemName: count } }
-const RECIPES = [
-  // Wood recipes
-  { name: 'Logs to Planks', result: 'planks', resultCount: 4, inputs: [{ name: 'log', count: 1 }] },
-  { name: 'Planks to Sticks', result: 'stick', resultCount: 4, inputs: [{ name: 'planks', count: 2 }] },
-  { name: 'Planks to Bowls', result: 'bowl', resultCount: 4, inputs: [{ name: 'planks', count: 3 }] },
-  { name: 'Planks to Ladders', result: 'ladder', resultCount: 3, inputs: [{ name: 'stick', count: 7 }] },
-  { name: 'Planks to Chests', result: 'chest', resultCount: 1, inputs: [{ name: 'planks', count: 8 }] },
-  { name: 'Planks to Signs', result: 'sign', resultCount: 3, inputs: [{ name: 'planks', count: 6 }, { name: 'stick', count: 1 }] },
-  
-  // Farming & Food
-  { name: 'Melon Slices to Melon Block', result: 'melon', resultCount: 1, inputs: [{ name: 'melon_slice', count: 9 }] },
-  { name: 'Sugar Cane to Paper', result: 'paper', resultCount: 3, inputs: [{ name: 'sugar_cane', count: 3 }] },
-  { name: 'Paper + Leather to Books', result: 'book', resultCount: 1, inputs: [{ name: 'paper', count: 3 }, { name: 'leather', count: 1 }] },
-  { name: 'Sugar Cane to Sugar', result: 'sugar', resultCount: 1, inputs: [{ name: 'sugar_cane', count: 1 }] },
-  { name: 'Wheat to Bread', result: 'bread', resultCount: 1, inputs: [{ name: 'wheat', count: 3 }] },
-  { name: 'Wheat to Hay Bale', result: 'hay_block', resultCount: 1, inputs: [{ name: 'wheat', count: 9 }] },
-  { name: 'Hay Bale to Wheat', result: 'wheat', resultCount: 9, inputs: [{ name: 'hay_block', count: 1 }] },
-  { name: 'Bone to Bone Meal', result: 'bone_meal', resultCount: 3, inputs: [{ name: 'bone', count: 1 }] },
+import {
+  normalizeListing,
+  normalizeCatalogListings,
+  validateCatalogReconciliation,
+  getUniqueCanonicalItems
+} from './dataModel.js';
 
-  // Ores & Metals
-  { name: 'Iron Ingot to Iron Block', result: 'iron_block', resultCount: 1, inputs: [{ name: 'iron_ingot', count: 9 }] },
-  { name: 'Iron Block to Iron Ingot', result: 'iron_ingot', resultCount: 9, inputs: [{ name: 'iron_block', count: 1 }] },
-  { name: 'Gold Ingot to Gold Block', result: 'gold_block', resultCount: 1, inputs: [{ name: 'gold_ingot', count: 9 }] },
-  { name: 'Gold Block to Gold Ingot', result: 'gold_ingot', resultCount: 9, inputs: [{ name: 'gold_block', count: 1 }] },
-  { name: 'Diamond to Diamond Block', result: 'diamond_block', resultCount: 1, inputs: [{ name: 'diamond', count: 9 }] },
-  { name: 'Diamond Block to Diamond', result: 'diamond', resultCount: 9, inputs: [{ name: 'diamond_block', count: 1 }] },
-  { name: 'Iron to Iron Bars', result: 'iron_bars', resultCount: 16, inputs: [{ name: 'iron_ingot', count: 6 }] },
-  { name: 'Iron to Bucket', result: 'bucket', resultCount: 1, inputs: [{ name: 'iron_ingot', count: 3 }] },
-  { name: 'Iron to Shears', result: 'shears', resultCount: 1, inputs: [{ name: 'iron_ingot', count: 2 }] },
-  { name: 'Iron to Iron Trapdoor', result: 'iron_trapdoor', resultCount: 1, inputs: [{ name: 'iron_ingot', count: 4 }] },
+import {
+  calculateFullInventorySaleValue,
+  calculateExpectedHarvestRevenue,
+  calculatePassiveFarmEconomics,
+  CROP_HARVEST_DATA,
+  PASSIVE_FARM_MODELS
+} from './cropEconomics.js';
 
-  // Minerals & Blocks
-  { name: 'Glowstone Dust to Block', result: 'glowstone', resultCount: 1, inputs: [{ name: 'glowstone_dust', count: 4 }] },
-  { name: 'Quartz to Quartz Block', result: 'quartz_block', resultCount: 1, inputs: [{ name: 'quartz', count: 4 }] },
-  { name: 'Sand to Sandstone', result: 'sandstone', resultCount: 1, inputs: [{ name: 'sand', count: 4 }] },
-  { name: 'Clay to Clay Block', result: 'clay', resultCount: 1, inputs: [{ name: 'clay_ball', count: 4 }] },
-  { name: 'Wool to Carpet', result: 'carpet', resultCount: 3, inputs: [{ name: 'wool', count: 2 }] }
-];
+import {
+  auditArbitrageOpportunities,
+  CONVERSION_RECIPES
+} from './arbitrageEngine.js';
 
-// Spawner drops and average hourly drops per spawner in a standard grinder
-const SPAWNER_DATA = [
+// Spawner drop data (Vanilla drops per spawner in typical water/fall grinder)
+export const SPAWNER_DATA = [
   { mob: 'Iron Golem', spawnerKeys: ['iron_golem', 'iron golem'], dropName: 'iron_ingot', dropsPerHour: 360 },
   { mob: 'Blaze', spawnerKeys: ['blaze'], dropName: 'blaze_rod', dropsPerHour: 450 },
   { mob: 'Creeper', spawnerKeys: ['creeper'], dropName: 'gunpowder', dropsPerHour: 400 },
@@ -59,30 +41,9 @@ const SPAWNER_DATA = [
   { mob: 'Witch', spawnerKeys: ['witch'], dropName: 'redstone', dropsPerHour: 250 }
 ];
 
-// Passive crops (zero player interaction after building)
-const PASSIVE_CROPS = [
-  { name: 'pumpkin', displayName: 'Pumpkin', seedName: 'pumpkin_seeds', defaultGrowthPerHourPer100: 150 },
-  { name: 'melon_slice', displayName: 'Melon Slice (Auto Piston/Axe)', seedName: 'melon_seeds', defaultGrowthPerHourPer100: 600 },
-  { name: 'melon', displayName: 'Melon Block (Silk Touch)', seedName: 'melon_seeds', defaultGrowthPerHourPer100: 150 },
-  { name: 'bamboo', displayName: 'Bamboo', seedName: 'bamboo', defaultGrowthPerHourPer100: 300 },
-  { name: 'cactus', displayName: 'Cactus', seedName: 'cactus', defaultGrowthPerHourPer100: 100 },
-  { name: 'kelp', displayName: 'Kelp', seedName: 'kelp', defaultGrowthPerHourPer100: 250 },
-  { name: 'sugar_cane', displayName: 'Sugar Cane', seedName: 'sugar_cane', defaultGrowthPerHourPer100: 100 }
-];
-
-// Active harvest crops (requires planting/replanting)
-const ACTIVE_CROPS = [
-  { name: 'wheat', displayName: 'Wheat', seedName: 'wheat_seeds', yieldPerHarvest: 1.0 },
-  { name: 'potato', displayName: 'Potato', seedName: 'potato', yieldPerHarvest: 2.5 },
-  { name: 'baked_potato', displayName: 'Baked Potato', seedName: 'potato', yieldPerHarvest: 2.5 },
-  { name: 'carrot', displayName: 'Carrot', seedName: 'carrot', yieldPerHarvest: 2.5 },
-  { name: 'beetroot', displayName: 'Beetroot', seedName: 'beetroot_seeds', yieldPerHarvest: 1.0 },
-  { name: 'nether_wart', displayName: 'Nether Wart', seedName: 'nether_wart', yieldPerHarvest: 2.5 }
-];
-
 /**
- * Finds matching items in catalog by strict item identifier matching
- * Prevents false-positives (e.g. 'melon' matching 'melon_slice' or 'wheat' matching 'wheat_seeds')
+ * Finds matching item in listings by strict technical ID or display name matching.
+ * Enforces exact token boundaries and forbids false-positive cross-matching.
  */
 export function findItem(catalogItems = [], query = '') {
   if (!query || !Array.isArray(catalogItems)) return undefined;
@@ -94,8 +55,8 @@ export function findItem(catalogItems = [], query = '') {
   // Pass 1: Exact ID or exact Display Name match
   const exactMatch = catalogItems.find(item => {
     if (!item) return false;
-    const name = (item.name || '').toLowerCase();
-    const displayName = (item.displayName || '').toLowerCase();
+    const name = (item.item_id || item.name || '').toLowerCase().replace(/^minecraft:/, '');
+    const displayName = (item.display_name || item.displayName || '').toLowerCase();
     return (
       name === qId ||
       name === `minecraft:${qId}` ||
@@ -106,7 +67,6 @@ export function findItem(catalogItems = [], query = '') {
   if (exactMatch) return exactMatch;
 
   // Pass 2: Canonical Minecraft aliases
-  // e.g. 'melon' -> 'melon_block', 'hay_block' -> 'hay_bale'
   const aliases = {
     'melon': ['melon_block', 'melon block'],
     'hay_block': ['hay_bale', 'hay bale'],
@@ -115,20 +75,19 @@ export function findItem(catalogItems = [], query = '') {
   if (aliases[qId]) {
     const aliasMatch = catalogItems.find(item => {
       if (!item) return false;
-      const name = (item.name || '').toLowerCase();
-      const displayName = (item.displayName || '').toLowerCase();
+      const name = (item.item_id || item.name || '').toLowerCase().replace(/^minecraft:/, '');
+      const displayName = (item.display_name || item.displayName || '').toLowerCase();
       return aliases[qId].some(a => name === a || displayName === a);
     });
     if (aliasMatch) return aliasMatch;
   }
 
   // Pass 3: Category suffixes (e.g. 'log', 'planks', 'wool', 'carpet')
-  // Allows 'log' to match 'oak_log', 'planks' to match 'oak_planks'
   const genericSuffixes = ['log', 'planks', 'wool', 'carpet', 'sandstone'];
   if (genericSuffixes.includes(qId)) {
     const suffixMatch = catalogItems.find(item => {
       if (!item) return false;
-      const name = (item.name || '').toLowerCase();
+      const name = (item.item_id || item.name || '').toLowerCase().replace(/^minecraft:/, '');
       return (
         (name.endsWith(`_${qId}`) || name === qId) &&
         !name.includes('slab') &&
@@ -140,7 +99,6 @@ export function findItem(catalogItems = [], query = '') {
   }
 
   // Pass 4: Word-boundary match with strict forbidden token exclusions
-  // Explicitly prevent cross-matching crops and sub-items
   const forbiddenMap = {
     melon: ['slice', 'seeds', 'speck', 'glistering'],
     wheat: ['seeds', 'bale', 'hay'],
@@ -158,15 +116,13 @@ export function findItem(catalogItems = [], query = '') {
 
   return catalogItems.find(item => {
     if (!item) return false;
-    const name = (item.name || '').toLowerCase();
-    const displayName = (item.displayName || '').toLowerCase();
+    const name = (item.item_id || item.name || '').toLowerCase().replace(/^minecraft:/, '');
+    const displayName = (item.display_name || item.displayName || '').toLowerCase();
 
-    // Check if item contains any forbidden sub-tokens
     for (const f of forbidden) {
       if (name.includes(f) || displayName.includes(f)) return false;
     }
 
-    // Check word-boundary token matching (e.g. "blaze_rod" matching query "blaze_rod")
     const wordsName = name.replace(/_/g, ' ').split(/\s+/);
     const wordsDisplay = displayName.replace(/_/g, ' ').split(/\s+/);
     const qWords = qDisplay.split(/\s+/);
@@ -179,335 +135,410 @@ export function findItem(catalogItems = [], query = '') {
 }
 
 /**
- * Runs deterministic economic calculations on a catalog of shop items
+ * Runs deterministic economic calculations on a shop catalog
  */
-export function analyzeEconomy(catalogData) {
-  const items = catalogData.items || (catalogData.categories || []).flatMap(c => c.items || []);
-  
-  // 1. Highest Sell Value Items
-  const sellableItems = items
-    .filter(i => i && i.canSell && typeof i.sellPrice === 'number' && i.sellPrice > 0)
-    .sort((a, b) => b.sellPrice - a.sellPrice);
+export function analyzeEconomy(catalogData, options = {}) {
+  // 1. Normalize listings into canonical data model (Phase 1)
+  const normalizedListings = normalizeCatalogListings(catalogData);
 
-  // Buyable items
-  const buyableItems = items
-    .filter(i => i && i.canBuy && typeof i.buyPrice === 'number' && i.buyPrice > 0);
+  // 2. Mathematical count reconciliation & duplicate tracking (Phase 2)
+  const reconciliation = validateCatalogReconciliation(normalizedListings);
 
-  const unbuyableItems = items.filter(i => i && !i.canBuy);
-  const unsellableItems = items.filter(i => i && !i.canSell);
+  // 3. Unique canonical items extraction (Phase 2 & Phase 5)
+  const uniqueItems = getUniqueCanonicalItems(normalizedListings);
 
-  // 2. Best Margin Items (Highest Sell / Buy ratio)
-  const marginItems = items
-    .filter(i => i && i.canSell && i.canBuy && i.buyPrice > 0 && i.sellPrice > 0)
+  // 4. Ranking 1: Top 10 unique items by player sale price (Phase 5)
+  const topUniqueSellItems = uniqueItems
+    .filter(i => i.can_sell && i.best_player_sell_price > 0)
+    .sort((a, b) => b.best_player_sell_price - a.best_player_sell_price)
+    .slice(0, 10)
     .map(i => ({
-      ...i,
-      ratio: i.sellPrice / i.buyPrice,
-      marginPct: ((i.sellPrice - i.buyPrice) / i.buyPrice) * 100
-    }))
-    .sort((a, b) => b.ratio - a.ratio);
+      canonical_id: i.canonical_id,
+      name: i.display_name,
+      player_sell_price: i.best_player_sell_price,
+      player_buy_price: i.best_player_buy_price,
+      listing_count: i.listing_count,
+      categories: i.categories
+    }));
 
-  // 3. Crafting Arbitrage Analysis (Infinite Money Loops)
-  const arbitrageOpportunities = [];
-  for (const recipe of RECIPES) {
-    let canPerform = true;
-    let totalCost = 0;
-    const ingredientDetails = [];
+  // 5. Ranking 2 & Systematic Arbitrage Audit (Phase 6 & 7)
+  const arbitrageAudit = auditArbitrageOpportunities(normalizedListings);
 
-    for (const input of recipe.inputs) {
-      const foundInput = findItem(items, input.name);
-      if (!foundInput || !foundInput.canBuy || typeof foundInput.buyPrice !== 'number') {
-        canPerform = false;
-        break;
-      }
-      const cost = foundInput.buyPrice * input.count;
-      totalCost += cost;
-      ingredientDetails.push({
-        item: foundInput.displayName || foundInput.name,
-        count: input.count,
-        unitBuyPrice: foundInput.buyPrice,
-        subtotal: cost
-      });
-    }
-
-    if (!canPerform) continue;
-
-    const foundOutput = findItem(items, recipe.result);
-    if (!foundOutput || !foundOutput.canSell || typeof foundOutput.sellPrice !== 'number') {
-      continue;
-    }
-
-    const totalRevenue = foundOutput.sellPrice * recipe.resultCount;
-    const netProfit = totalRevenue - totalCost;
-    const profitMarginPct = totalCost > 0 ? (netProfit / totalCost) * 100 : 0;
-
-    if (netProfit > 0) {
-      arbitrageOpportunities.push({
-        recipeName: recipe.name,
-        craftedItem: foundOutput.displayName || foundOutput.name,
-        craftedCount: recipe.resultCount,
-        unitSellPrice: foundOutput.sellPrice,
-        totalCost,
-        totalRevenue,
-        netProfitPerCraft: netProfit,
-        profitMarginPct,
-        ingredients: ingredientDetails
-      });
-    }
-  }
-
-  // Sort arbitrage opportunities by highest net profit per craft
-  arbitrageOpportunities.sort((a, b) => b.netProfitPerCraft - a.netProfitPerCraft);
-
-  // 4. Passive AFK Crops Ranking
-  const passiveFarmRankings = [];
-  for (const crop of PASSIVE_CROPS) {
-    const found = findItem(items, crop.name);
-    const foundSeed = crop.seedName ? findItem(items, crop.seedName) : null;
-    const seedBuyPrice = (foundSeed && foundSeed.canBuy && typeof foundSeed.buyPrice === 'number') ? foundSeed.buyPrice : null;
-
-    if (found && found.canSell && typeof found.sellPrice === 'number') {
-      const hourlyProfitPer100 = crop.defaultGrowthPerHourPer100 * found.sellPrice;
-      passiveFarmRankings.push({
-        crop: crop.displayName,
-        name: crop.name,
-        canBuy: !!found.canBuy,
-        buyPrice: (found.canBuy && typeof found.buyPrice === 'number') ? found.buyPrice : null,
-        sellPrice: found.sellPrice,
-        seedName: foundSeed ? (foundSeed.displayName || foundSeed.name) : null,
-        seedBuyPrice,
-        estHourlyProfitPer100Plots: hourlyProfitPer100,
-        difficulty: 'Zero player interaction (AFK)'
-      });
-    }
-  }
-  passiveFarmRankings.sort((a, b) => b.estHourlyProfitPer100Plots - a.estHourlyProfitPer100Plots);
-
-  // 5. Active Farming Ranking
+  // 6. Active Crop Economics (Phase 3)
   const activeFarmRankings = [];
-  for (const crop of ACTIVE_CROPS) {
-    const found = findItem(items, crop.name);
-    const foundSeed = crop.seedName ? findItem(items, crop.seedName) : null;
-    const seedBuyPrice = (foundSeed && foundSeed.canBuy && typeof foundSeed.buyPrice === 'number') ? foundSeed.buyPrice : null;
+  const activeCropKeys = ['nether_wart', 'potato', 'carrot', 'wheat', 'beetroot'];
 
-    if (found && found.canSell && typeof found.sellPrice === 'number') {
-      const returnPerHarvest = crop.yieldPerHarvest * found.sellPrice;
+  for (const cropKey of activeCropKeys) {
+    const cropListing = findItem(normalizedListings, cropKey);
+    const harvestData = CROP_HARVEST_DATA[cropKey];
+
+    if (cropListing && cropListing.sellable && typeof cropListing.player_sell_price === 'number') {
+      const sellPrice = cropListing.player_sell_price;
+      
+      // Look up seed/starter item
+      const seedKey = harvestData?.seedName || cropKey;
+      const seedListing = findItem(normalizedListings, seedKey);
+      const seedBuyPrice = (seedListing && seedListing.buyable && typeof seedListing.player_buy_price === 'number') 
+        ? seedListing.player_buy_price 
+        : null;
+      const seedSellPrice = (seedListing && seedListing.sellable && typeof seedListing.player_sell_price === 'number') 
+        ? seedListing.player_sell_price 
+        : null;
+
+      // Full inventory sale value (36 slots * item max stack size * sell price)
+      const inventoryVal = calculateFullInventorySaleValue(cropListing, {
+        inventorySlots: options.inventorySlots || 36
+      });
+
+      // Expected harvest revenue per block (accounting for replanting)
+      const harvestRevenue = calculateExpectedHarvestRevenue(cropKey, sellPrice, seedSellPrice);
+
       activeFarmRankings.push({
-        crop: crop.displayName,
-        name: crop.name,
-        canBuy: !!found.canBuy,
-        buyPrice: (found.canBuy && typeof found.buyPrice === 'number') ? found.buyPrice : null,
-        sellPrice: found.sellPrice,
-        seedName: foundSeed ? (foundSeed.displayName || foundSeed.name) : null,
+        crop: cropListing.display_name || cropKey,
+        name: cropKey,
+        canBuy: cropListing.buyable,
+        buyPrice: cropListing.player_buy_price,
+        sellPrice,
+        seedName: harvestData?.seedDisplayName || seedKey,
         seedBuyPrice,
-        returnPerHarvest,
-        estProfitPerInventory: returnPerHarvest * 2304 // full inventory of 36 stacks
+        // Detailed economics
+        full_inventory_sale_value: inventoryVal.full_inventory_sale_value,
+        available_inventory_slots: inventoryVal.available_inventory_slots,
+        maximum_stack_size: inventoryVal.maximum_stack_size,
+        expected_gross_revenue_per_block: harvestRevenue?.expected_gross_revenue_per_block || sellPrice,
+        expected_net_revenue_per_block: harvestRevenue?.expected_net_revenue_per_block || sellPrice,
+        replanting_retention: harvestRevenue?.replanting_retention || '1 unit replanted',
+        // Backward compatibility
+        returnPerHarvest: harvestRevenue?.expected_net_revenue_per_block || sellPrice,
+        estProfitPerInventory: inventoryVal.full_inventory_sale_value
       });
     }
   }
-  activeFarmRankings.sort((a, b) => b.returnPerHarvest - a.returnPerHarvest);
+  // Sort active crops by full inventory sale value descending
+  activeFarmRankings.sort((a, b) => b.full_inventory_sale_value - a.full_inventory_sale_value);
 
-  // 6. Spawner Break-Even Analysis
+  // 7. Passive AFK Farm Economics (Phase 4)
+  const passiveFarmRankings = [];
+  const passiveFarmKeys = ['pumpkin', 'bamboo', 'melon_slice', 'cactus', 'kelp', 'sugar_cane'];
+
+  for (const farmKey of passiveFarmKeys) {
+    const model = PASSIVE_FARM_MODELS[farmKey];
+    if (!model) continue;
+
+    const cropListing = findItem(normalizedListings, model.cropName);
+    const plantingListing = findItem(normalizedListings, model.plantingMaterialName);
+
+    if (cropListing && cropListing.sellable && typeof cropListing.player_sell_price === 'number') {
+      const sellPrice = cropListing.player_sell_price;
+      const plantingCost = (plantingListing && plantingListing.buyable && typeof plantingListing.player_buy_price === 'number') 
+        ? plantingListing.player_buy_price 
+        : null;
+
+      const farmEcon = calculatePassiveFarmEconomics(farmKey, sellPrice, plantingCost, {
+        plantCount: options.plantCount || 100
+      });
+
+      passiveFarmRankings.push({
+        crop: model.cropName === 'cactus' ? 'Cactus' : (model.cropName === 'pumpkin' ? 'Pumpkin' : (model.cropName === 'bamboo' ? 'Bamboo' : (model.cropName === 'melon_slice' ? 'Melon Slice (Auto Piston/Axe)' : (model.cropName === 'kelp' ? 'Kelp' : 'Sugar Cane')))),
+        farm_name: farmEcon.farm_name,
+        name: model.cropName,
+        canBuy: cropListing.buyable,
+        buyPrice: cropListing.player_buy_price,
+        sellPrice,
+        seedName: plantingListing ? plantingListing.display_name : model.plantingMaterialName,
+        seedBuyPrice: plantingCost,
+        // Detailed metrics
+        plant_count: farmEcon.plant_count,
+        estimated_collected_items_per_hour: farmEcon.estimated_collected_items_per_hour,
+        gross_sales_revenue_per_hour: farmEcon.gross_sales_revenue_per_hour,
+        recurring_operating_costs_per_hour: farmEcon.recurring_operating_costs_per_hour,
+        net_profit_per_hour: farmEcon.net_profit_per_hour,
+        initial_planting_capital: farmEcon.initial_planting_capital,
+        payback_period_hours: farmEcon.payback_period_hours,
+        confidence_level: farmEcon.confidence_level,
+        assumptions: farmEcon.assumptions,
+        difficulty: 'Zero player interaction (AFK)',
+        // Backward compatibility
+        estHourlyProfitPer100Plots: farmEcon.net_profit_per_hour
+      });
+    }
+  }
+  // Sort passive farms by net profit per hour descending
+  passiveFarmRankings.sort((a, b) => b.net_profit_per_hour - a.net_profit_per_hour);
+
+  // 8. Spawner Break-Even Analysis (Phase 5)
   const spawnerAnalysis = [];
   for (const spawner of SPAWNER_DATA) {
-    // Find spawner in catalog
-    const foundSpawner = items.find(i => {
-      const name = (i.displayName || i.name || '').toLowerCase();
-      return (
-        name.includes('spawner') &&
-        spawner.spawnerKeys.some(k => name.includes(k))
-      );
+    const foundSpawner = normalizedListings.find(i => {
+      const name = (i.display_name || i.name || '').toLowerCase();
+      return name.includes('spawner') && spawner.spawnerKeys.some(k => name.includes(k));
     });
 
-    const foundDrop = findItem(items, spawner.dropName);
+    const foundDrop = findItem(normalizedListings, spawner.dropName);
 
-    if (foundSpawner && foundDrop && foundSpawner.canBuy && foundDrop.canSell) {
-      const spawnerCost = foundSpawner.buyPrice;
-      const dropSellPrice = foundDrop.sellPrice;
+    if (foundSpawner && foundDrop && foundSpawner.buyable && foundDrop.sellable) {
+      const spawnerCost = foundSpawner.player_buy_price;
+      const dropSellPrice = foundDrop.player_sell_price;
       const hourlyDropRevenue = spawner.dropsPerHour * dropSellPrice;
       const hoursToBreakEven = hourlyDropRevenue > 0 ? (spawnerCost / hourlyDropRevenue) : Infinity;
 
       spawnerAnalysis.push({
         mob: spawner.mob,
         spawnerCost,
-        dropName: foundDrop.displayName || foundDrop.name,
+        dropName: foundDrop.display_name || foundDrop.name,
         dropSellPrice,
         hourlyRevenue: hourlyDropRevenue,
-        hoursToBreakEven: Number(hoursToBreakEven.toFixed(1))
+        hoursToBreakEven: Number(hoursToBreakEven.toFixed(1)),
+        returnOnCapitalPerHourPct: spawnerCost > 0 ? Number(((hourlyDropRevenue / spawnerCost) * 100).toFixed(2)) : 0
       });
     }
   }
   spawnerAnalysis.sort((a, b) => a.hoursToBreakEven - b.hoursToBreakEven);
 
-  // 7. Check Melon Block vs Melon Slice availability
-  const melonBlockFound = findItem(items, 'melon');
-  const melonSliceFound = findItem(items, 'melon_slice');
+  // 9. Check Melon Block vs Melon Slice availability
+  const melonBlockFound = findItem(normalizedListings, 'melon');
+  const melonSliceFound = findItem(normalizedListings, 'melon_slice');
   const melonClarification = (!melonBlockFound && melonSliceFound) ? {
-    sliceSellPrice: melonSliceFound.sellPrice,
-    sliceBuyPrice: melonSliceFound.canBuy ? melonSliceFound.buyPrice : null,
+    sliceSellPrice: melonSliceFound.player_sell_price,
+    sliceBuyPrice: melonSliceFound.buyable ? melonSliceFound.player_buy_price : null,
     message: 'Whole Melon Blocks are NOT sold or bought by the shop. The shop only trades Melon Slices and Melon Seeds. Breaking a melon block (via piston or axe) produces slices that sell to the shop.'
   } : null;
 
   return {
-    totalItemsScanned: items.length,
-    sellableCount: sellableItems.length,
-    buyableCount: buyableItems.length,
-    unbuyableCount: unbuyableItems.length,
-    unsellableCount: unsellableItems.length,
-    arbitrageOpportunities,
+    scrapedAt: catalogData.scrapedAt || new Date().toISOString(),
+    server: catalogData.server || 'the server',
+    totalItemsScanned: reconciliation.total_listings,
+    reconciliation,
+    unique_items_count: reconciliation.unique_canonical_items,
+    sellableCount: reconciliation.sellable_listings,
+    buyableCount: reconciliation.buyable_listings,
+    unbuyableCount: reconciliation.unbuyable_listings,
+    unsellableCount: reconciliation.unsellable_listings,
+    profitableSellableCount: reconciliation.profitable_sellable_listings,
+    zeroPayoutSellableCount: reconciliation.zero_payout_sellable_listings,
+
+    // Rankings & Analyses
+    topSellItems: topUniqueSellItems,
+    arbitrageOpportunities: arbitrageAudit.confirmed_arbitrage,
+    unverifiedOpportunities: arbitrageAudit.unverified_opportunities,
+    transactionExploits: arbitrageAudit.transaction_exploits,
     passiveFarmRankings,
     activeFarmRankings,
     spawnerAnalysis,
-    melonClarification,
-    topSellItems: sellableItems.slice(0, 10).map(i => ({
-      name: i.displayName || i.name,
-      sellPrice: i.sellPrice,
-      buyPrice: i.buyPrice
-    })),
-    bestMarginItems: marginItems.slice(0, 10)
+    melonClarification
   };
 }
 
 /**
- * Generates an LLM-ready prompt summarizing the economy findings
+ * Generates an LLM-ready strategic prompt containing all 12 auditable sections (Phase 9)
  */
 export function generateAiPrompt(catalogData, analysis) {
-  const server = catalogData.server || 'the server';
-  
-  let prompt = `You are a Minecraft Economy Master and min-max strategist. Analyze the following shop data collected from ${server} and create the ultimate step-by-step roadmap to become the richest player on this server.\n\n`;
+  const server = analysis.server || catalogData?.server || 'the server';
+  const recon = analysis.reconciliation || {};
 
-  prompt += `### Scanned Economy Overview:\n`;
-  prompt += `- Total items in shop: ${analysis.totalItemsScanned}\n`;
-  prompt += `- Sellable items (player sells to shop): ${analysis.sellableCount}\n`;
-  prompt += `- Buyable items (player buys from shop): ${analysis.buyableCount || 'N/A'}\n`;
-  if (analysis.unbuyableCount) {
-    prompt += `- Unbuyable / Sell-only items (cannot buy from shop): ${analysis.unbuyableCount}\n`;
-  }
-  if (analysis.unsellableCount) {
-    prompt += `- Unsellable / Buy-only items (cannot sell back to shop): ${analysis.unsellableCount}\n`;
+  let prompt = `You are a Minecraft Economy Master and min-max strategist. Analyze the following verified shop data collected from ${server} and create the ultimate step-by-step roadmap to become the richest player on this server.\n\n`;
+
+  prompt += `### 1. Data Collection & Catalog Invariants:\n`;
+  prompt += `- Source Server: ${server}\n`;
+  prompt += `- Collection Timestamp: ${analysis.scrapedAt || 'Recent'}\n`;
+  prompt += `- Total Shop Listings: ${recon.total_listings || analysis.totalItemsScanned}\n`;
+  prompt += `- Unique Canonical Minecraft Items: ${recon.unique_canonical_items || analysis.unique_items_count}\n`;
+  prompt += `- Purchase Classification: ${recon.buyable_listings} buyable + ${recon.unbuyable_listings} unbuyable = ${recon.total_listings} total listings (Reconciled: ${recon.purchase_reconciles ? 'YES' : 'NO'})\n`;
+  prompt += `- Sale Classification: ${recon.sellable_listings} sellable (${recon.profitable_sellable_listings} paying >$0, ${recon.zero_payout_sellable_listings} paying $0.00) + ${recon.unsellable_listings} unsellable = ${recon.total_listings} total listings (Reconciled: ${recon.sale_reconciles ? 'YES' : 'NO'})\n`;
+  if (recon.warnings && recon.warnings.length > 0) {
+    for (const w of recon.warnings) {
+      prompt += `  * Warning: ${w}\n`;
+    }
   }
   prompt += `\n`;
 
+  prompt += `### 2. Transaction Definitions (Unambiguous Perspective):\n`;
+  prompt += `- Player Buy Price: The price the player pays to acquire the item from the shop.\n`;
+  prompt += `- Player Sell Price: The price the shop pays to the player upon selling.\n\n`;
+
   if (analysis.melonClarification) {
-    prompt += `### 🍈 Item Economics Clarification (Melon Block vs Melon Slice):\n`;
+    prompt += `### 3. Item Economics Clarification (Melon Block vs Melon Slice):\n`;
     prompt += `- ${analysis.melonClarification.message}\n`;
-    prompt += `- **Melon Slice**: Sells for $${analysis.melonClarification.sliceSellPrice.toFixed(2)}${analysis.melonClarification.sliceBuyPrice ? ` | Buys for $${analysis.melonClarification.sliceBuyPrice.toFixed(2)}` : ' | Cannot be bought'}\n`;
-    prompt += `- **Melon Block**: Not in shop (Cannot be bought, Cannot be sold directly)\n\n`;
+    prompt += `- **Melon Slice**: Player Sell Price: $${analysis.melonClarification.sliceSellPrice.toFixed(2)}${analysis.melonClarification.sliceBuyPrice ? ` | Player Buy Price: $${analysis.melonClarification.sliceBuyPrice.toFixed(2)}` : ' | Cannot be bought'}\n`;
+    prompt += `- **Melon Block**: Not traded in shop (Cannot be bought, Cannot be sold directly)\n\n`;
   }
 
-  if (analysis.arbitrageOpportunities.length > 0) {
-    prompt += `### 🚨 DISCOVERED CRAFTING ARBITRAGE (Infinite Money Exploits):\n`;
+  if (analysis.transactionExploits && analysis.transactionExploits.length > 0) {
+    prompt += `### ⚠️ DIRECT TRANSACTION EXPLOITS (Pricing Inversions):\n`;
+    for (const exp of analysis.transactionExploits) {
+      prompt += `- **${exp.title}**: Buy for $${exp.player_buy_price.toFixed(2)} -> Sell back for $${exp.player_sell_price.toFixed(2)} (Instant profit: +$${exp.profit_per_unit.toFixed(2)}/item, +${exp.profit_margin_pct}% margin)\n`;
+    }
+    prompt += `\n`;
+  }
+
+  if (analysis.arbitrageOpportunities && analysis.arbitrageOpportunities.length > 0) {
+    prompt += `### 🚨 DISCOVERED CRAFTING ARBITRAGE (CONFIRMED PROFITABLE):\n`;
     for (const arb of analysis.arbitrageOpportunities) {
-      prompt += `- **${arb.recipeName}**: Cost $${arb.totalCost.toFixed(2)} to buy ingredients -> Sell ${arb.craftedCount}x ${arb.craftedItem} for $${arb.totalRevenue.toFixed(2)} (Net Profit: +$${arb.netProfitPerCraft.toFixed(2)} per craft, +${arb.profitMarginPct.toFixed(1)}% margin!)\n`;
+      prompt += `- **${arb.title}**: Cost $${arb.total_acquisition_cost.toFixed(2)} to acquire inputs -> Sell ${arb.crafted_count}x ${arb.crafted_item} for $${arb.total_sale_revenue.toFixed(2)} (Net Profit: +$${arb.net_profit_per_cycle.toFixed(2)} per cycle, +${arb.profit_margin_pct}% margin)\n`;
     }
     prompt += `\n`;
   } else {
-    prompt += `### Crafting Arbitrage:\n- No direct infinite crafting loops found in default recipes (shop prices are balanced for basic crafting).\n\n`;
+    prompt += `### Crafting Arbitrage:\n- Evaluated 60+ vanilla conversion and unpacking recipes against all shop listings: No direct profitable crafting loops exist (shop margins prevent infinite loops on standard recipes).\n\n`;
   }
 
-  if (analysis.passiveFarmRankings.length > 0) {
-    prompt += `### 🌾 Passive AFK Farm Rankings (Bot AFK farming with zero player actions):\n`;
-    for (const crop of analysis.passiveFarmRankings) {
-      const buyStr = crop.canBuy && crop.buyPrice !== null ? `Shop Buy: $${crop.buyPrice.toFixed(2)}` : `Shop Buy: Cannot buy directly`;
-      const seedStr = crop.seedBuyPrice !== null ? ` | Seed Buy: $${crop.seedBuyPrice.toFixed(2)}` : '';
-      prompt += `- **${crop.crop}**: Sell: $${crop.sellPrice.toFixed(2)} | ${buyStr}${seedStr} | Est. Profit: $${crop.estHourlyProfitPer100Plots.toFixed(2)}/hr per 100 plants\n`;
+  if (analysis.passiveFarmRankings && analysis.passiveFarmRankings.length > 0) {
+    prompt += `### 🌾 Passive AFK Farm Rankings (Fully automated with zero player movement):\n`;
+    for (const farm of analysis.passiveFarmRankings) {
+      const buyStr = farm.canBuy && farm.buyPrice !== null ? `Player Buy / Shop Buy: $${farm.buyPrice.toFixed(2)}` : `Player Buy / Shop Buy: Cannot buy directly`;
+      const seedStr = farm.seedBuyPrice !== null ? ` | Planting Material: $${farm.seedBuyPrice.toFixed(2)} (${farm.seedName})` : '';
+      const paybackStr = farm.payback_period_hours !== null ? ` | Establishment Payback: ${farm.payback_period_hours} hrs` : '';
+      prompt += `- **${farm.crop}** (100 plants): Player Sell: $${farm.sellPrice.toFixed(2)} | Gross Sales: $${farm.gross_sales_revenue_per_hour.toFixed(2)}/hr | Net Profit: $${farm.net_profit_per_hour.toFixed(2)}/hr | ${buyStr}${seedStr}${paybackStr} [Confidence: ${farm.confidence_level}]\n`;
     }
     prompt += `\n`;
   }
 
-  if (analysis.activeFarmRankings.length > 0) {
-    prompt += `### 🚜 Active Crop Rankings (Manual harvesting/replanting):\n`;
+  if (analysis.activeFarmRankings && analysis.activeFarmRankings.length > 0) {
+    prompt += `### 🚜 Active Harvest Crop Economics (Manual harvesting & replanting):\n`;
     for (const crop of analysis.activeFarmRankings) {
-      const buyStr = crop.canBuy && crop.buyPrice !== null ? `Shop Buy: $${crop.buyPrice.toFixed(2)}` : `Shop Buy: Cannot buy directly`;
-      const seedStr = crop.seedBuyPrice !== null ? ` | Seed Buy: $${crop.seedBuyPrice.toFixed(2)}` : '';
-      prompt += `- **${crop.crop}**: Sell: $${crop.sellPrice.toFixed(2)} | ${buyStr}${seedStr} | Return per harvest: $${crop.returnPerHarvest.toFixed(2)} | Full inventory sell: ~$${crop.estProfitPerInventory.toFixed(2)}\n`;
+      const buyStr = crop.canBuy && crop.buyPrice !== null ? `Player Buy / Shop Buy: $${crop.buyPrice.toFixed(2)}` : `Player Buy / Shop Buy: Cannot buy directly`;
+      const seedStr = crop.seedBuyPrice !== null ? ` | Planting Material: $${crop.seedBuyPrice.toFixed(2)}` : '';
+      prompt += `- **${crop.crop}**: Player Sell: $${crop.sellPrice.toFixed(2)} | Full 36-slot Inventory Value: $${crop.full_inventory_sale_value.toLocaleString()} | Expected Gross / block: $${crop.expected_gross_revenue_per_block.toFixed(2)} | Expected Net / block: $${crop.expected_net_revenue_per_block.toFixed(2)} (${crop.replanting_retention}) | ${buyStr}${seedStr}\n`;
     }
     prompt += `\n`;
   }
 
-  if (analysis.spawnerAnalysis.length > 0) {
-    prompt += `### ⚡ Spawner Investment ROI:\n`;
+  if (analysis.spawnerAnalysis && analysis.spawnerAnalysis.length > 0) {
+    prompt += `### ⚡ Spawner Investment ROI (Ranked by fastest break-even):\n`;
     for (const sp of analysis.spawnerAnalysis) {
-      prompt += `- **${sp.mob} Spawner**: Cost $${sp.spawnerCost.toLocaleString()} | Drops ${sp.dropName} @ $${sp.dropSellPrice}/ea | Revenue: ~$${sp.hourlyRevenue.toFixed(2)}/hr | Payback Period: **${sp.hoursToBreakEven} hours**\n`;
+      prompt += `- **${sp.mob} Spawner**: Cost $${sp.spawnerCost.toLocaleString()} | Drops ${sp.dropName} @ $${sp.dropSellPrice}/ea | Hourly Revenue: ~$${sp.hourlyRevenue.toFixed(2)}/hr | Payback Period: **${sp.hoursToBreakEven} hours** (${sp.returnOnCapitalPerHourPct}%/hr ROC)\n`;
     }
     prompt += `\n`;
   }
 
-  if (analysis.topSellItems.length > 0) {
-    prompt += `### 💎 Top 10 Highest Value Sell Items:\n`;
+  if (analysis.topSellItems && analysis.topSellItems.length > 0) {
+    prompt += `### 💎 Top 10 Highest-Value Unique Sellable Items (Deduplicated):\n`;
     for (const itm of analysis.topSellItems) {
-      prompt += `- ${itm.name}: Sells for $${itm.sellPrice.toFixed(2)}${itm.buyPrice ? ` (Buys at $${itm.buyPrice.toFixed(2)})` : ''}\n`;
+      prompt += `- **${itm.name}**: Sells for $${itm.player_sell_price.toFixed(2)}${itm.player_buy_price ? ` (Buys at $${itm.player_buy_price.toFixed(2)})` : ''} [Appears in ${itm.listing_count} listing(s): ${itm.categories.join(', ')}]\n`;
     }
     prompt += `\n`;
   }
 
-  prompt += `\nBased on these exact economics, provide:\n`;
-  prompt += `1. **Phase 1: The Fast Start ($0 to $50,000)** - Quickest starter grind to get seed capital.\n`;
-  prompt += `2. **Phase 2: The AFK Factory ($50,000 to $500,000)** - How to set up the AFK bot with the best passive farms discovered above.\n`;
+  prompt += `Based on these exact, auditable economics, provide:\n`;
+  prompt += `1. **Phase 1: Zero Capital Start ($0 to $50,000)** - Quickest starter grind to get seed capital.\n`;
+  prompt += `2. **Phase 2: The AFK Factory ($50,000 to $500,000)** - How to set up the AFK bot with the best passive farms above.\n`;
   prompt += `3. **Phase 3: The Industrial Empire ($500,000+)** - Best spawner investments or bulk operations to dominate the economy.\n`;
-  prompt += `4. **Key Exploits & Hidden Gems** - Specific pricing anomalies or arbitrage found above.\n`;
+  prompt += `4. **Strategic Summary** - Transparent progression path with zero false assumptions.\n`;
   prompt += `Be concise, strategic, and direct.`;
 
   return prompt;
 }
 
 /**
- * Generates clean Markdown report from analysis
+ * Generates clean, transparent, auditable Markdown report from analysis (Phase 9)
  */
 export function generateMarkdownReport(analysis, aiResponse = null) {
+  const recon = analysis.reconciliation || {};
   let md = `# 💰 Server Economy & Wealth Masterplan\n\n`;
 
+  // 1. Audit & Invariant Summary
+  md += `## 📊 1. Data Collection & Reconciliation Invariants\n`;
+  md += `| Metric | Count | Details |\n`;
+  md += `|---|---|---|\n`;
+  md += `| **Total Shop Listings** | **${recon.total_listings || analysis.totalItemsScanned}** | Total items collected from shop GUI menus |\n`;
+  md += `| **Unique Canonical Minecraft Items** | **${recon.unique_canonical_items || analysis.unique_items_count}** | Distinct Minecraft item IDs (${(recon.total_listings || 0) - (recon.unique_canonical_items || 0)} duplicate listings across categories) |\n`;
+  md += `| **Buyable Listings** | **${recon.buyable_listings}** | Shop allows player purchase |\n`;
+  md += `| **Unbuyable Listings** | **${recon.unbuyable_listings}** | Shop does not sell to player |\n`;
+  md += `| **Purchase Reconciled** | **${recon.purchase_reconciles ? '✅ PASS' : '❌ FAIL'}** | \`${recon.equations?.purchase}\` |\n`;
+  md += `| **Sellable Listings** | **${recon.sellable_listings}** | Shop accepts item (${recon.profitable_sellable_listings} paying >$0, ${recon.zero_payout_sellable_listings} paying $0.00) |\n`;
+  md += `| **Unsellable Listings** | **${recon.unsellable_listings}** | Shop does not buy item |\n`;
+  md += `| **Sale Reconciled** | **${recon.sale_reconciles ? '✅ PASS' : '❌ FAIL'}** | \`${recon.equations?.sale}\` |\n\n`;
+
+  if (recon.warnings && recon.warnings.length > 0) {
+    md += `> [!NOTE]\n> **Catalog Validation Warnings**:\n`;
+    for (const w of recon.warnings) {
+      md += `> - ${w}\n`;
+    }
+    md += `\n`;
+  }
+
+  // 2. Melon Clarification
   if (analysis.melonClarification) {
-    md += `> [!NOTE]\n`;
+    md += `> [!IMPORTANT]\n`;
     md += `> **Melon Block vs Melon Slice Shop Economics**:\n`;
     md += `> ${analysis.melonClarification.message}\n`;
-    md += `> - **Melon Slice**: Sells for \$${analysis.melonClarification.sliceSellPrice.toFixed(2)}${analysis.melonClarification.sliceBuyPrice ? `, Buys for \$${analysis.melonClarification.sliceBuyPrice.toFixed(2)}` : ''}\n`;
+    md += `> - **Melon Slice**: Player Sell: \$${analysis.melonClarification.sliceSellPrice.toFixed(2)}${analysis.melonClarification.sliceBuyPrice ? ` | Player Buy: \$${analysis.melonClarification.sliceBuyPrice.toFixed(2)}` : ''}\n`;
     md += `> - **Melon Block**: Not traded directly in shop\n\n`;
   }
 
-  if (analysis.arbitrageOpportunities.length > 0) {
-    md += `> [!CAUTION]\n> **INFINITE MONEY ARBITRAGE DETECTED!**\n> You can buy ingredients directly from /shop, craft them, and sell them back for an instant profit loop.\n\n`;
-    md += `| Crafting Recipe | Buy Cost | Sell Revenue | Net Profit / Craft | Margin |\n`;
+  // 3. Direct Exploits & Arbitrage
+  if (analysis.transactionExploits && analysis.transactionExploits.length > 0) {
+    md += `## ⚠️ Direct Transaction Exploits (Pricing Inversions)\n\n`;
+    md += `| Item | Player Buy Price | Player Sell Price | Profit / Item | Margin |\n`;
     md += `|---|---|---|---|---|\n`;
-    for (const arb of analysis.arbitrageOpportunities) {
-      md += `| **${arb.recipeName}** | \$${arb.totalCost.toFixed(2)} | \$${arb.totalRevenue.toFixed(2)} | **+\$${arb.netProfitPerCraft.toFixed(2)}** | +${arb.profitMarginPct.toFixed(1)}% |\n`;
+    for (const exp of analysis.transactionExploits) {
+      md += `| **${exp.display_name}** | \$${exp.player_buy_price.toFixed(2)} | \$${exp.player_sell_price.toFixed(2)} | **+\$${exp.profit_per_unit.toFixed(2)}** | +${exp.profit_margin_pct}% |\n`;
     }
     md += `\n`;
   }
 
-  md += `## 🌾 Best Passive AFK Farms\n`;
-  md += `These farms generate income 24/7 while your bot stays AFK in your base without touching any controls:\n\n`;
-  md += `| Crop | Sell Price | Shop Buy Price | Seed Buy Price | Est. Profit / hr (100 blocks) | Strategy |\n`;
-  md += `|---|---|---|---|---|---|\n`;
-  for (const crop of analysis.passiveFarmRankings) {
-    const buyDisplay = crop.canBuy && crop.buyPrice !== null ? `\$${crop.buyPrice.toFixed(2)}` : 'Cannot buy';
-    const seedDisplay = crop.seedBuyPrice !== null ? `\$${crop.seedBuyPrice.toFixed(2)}` : 'N/A';
-    md += `| **${crop.crop}** | \$${crop.sellPrice.toFixed(2)} | ${buyDisplay} | ${seedDisplay} | \$${crop.estHourlyProfitPer100Plots.toFixed(2)}/hr | Build stacked zero-interaction auto farm |\n`;
+  if (analysis.arbitrageOpportunities && analysis.arbitrageOpportunities.length > 0) {
+    md += `> [!CAUTION]\n> **INFINITE MONEY ARBITRAGE DETECTED!**\n> You can buy ingredients directly from /shop, craft them, and sell them back for an instant profit loop.\n\n`;
+    md += `## 🚨 Confirmed Profitable Crafting Arbitrage\n\n`;
+    md += `| Recipe | Total Acquisition Cost | Gross Sell Revenue | Net Profit / Cycle | Margin |\n`;
+    md += `|---|---|---|---|---|\n`;
+    for (const arb of analysis.arbitrageOpportunities) {
+      md += `| **${arb.title}** | \$${arb.total_acquisition_cost.toFixed(2)} | \$${arb.total_sale_revenue.toFixed(2)} | **+\$${arb.net_profit_per_cycle.toFixed(2)}** | +${arb.profit_margin_pct}% |\n`;
+    }
+    md += `\n`;
+  }
+
+  // 4. Passive Farm Rankings
+  md += `## 🌾 Best Passive AFK Farms (Bot AFK 24/7)\n`;
+  md += `Calculations based on 100 plants, default random tick speed (3), and 90% automated collection efficiency:\n\n`;
+  md += `| Farm | Player Sell Price | Shop Buy Price | Seed Buy Price | Gross Revenue / hr | Net Profit / hr | Establishment Payback |\n`;
+  md += `|---|---|---|---|---|---|---|\n`;
+  for (const farm of analysis.passiveFarmRankings) {
+    const buyDisplay = farm.canBuy && farm.buyPrice !== null ? `\$${farm.buyPrice.toFixed(2)}` : 'Cannot buy';
+    const seedCostStr = farm.seedBuyPrice !== null ? `\$${farm.seedBuyPrice.toFixed(2)}` : 'N/A';
+    const paybackStr = farm.payback_period_hours !== null ? `**${farm.payback_period_hours} hrs**` : 'N/A';
+    md += `| **${farm.crop}** | \$${farm.sellPrice.toFixed(2)} | ${buyDisplay} | ${seedCostStr} | \$${farm.gross_sales_revenue_per_hour.toFixed(2)}/hr | **\$${farm.net_profit_per_hour.toFixed(2)}/hr** | ${paybackStr} |\n`;
   }
   md += `\n`;
 
-  if (analysis.activeFarmRankings.length > 0) {
-    md += `## 🚜 Active Crop Rankings (Manual harvesting/replanting)\n\n`;
-    md += `| Crop | Sell Price | Shop Buy Price | Seed Buy Price | Return / Harvest | Est. Inventory Profit |\n`;
-    md += `|---|---|---|---|---|---|\n`;
+  // 5. Active Crop Rankings
+  if (analysis.activeFarmRankings && analysis.activeFarmRankings.length > 0) {
+    md += `## 🚜 Active Harvest Crop Economics (Manual Replanting)\n`;
+    md += `Full inventory represents a standard 36-slot player inventory of max stack size (2,304 units for 64-stack crops):\n\n`;
+    md += `| Crop | Player Sell Price | Shop Buy Price | Seed Buy Price | Full 36-Slot Inv Value | Gross Drop / Block | Net Revenue / Block |\n`;
+    md += `|---|---|---|---|---|---|---|\n`;
     for (const crop of analysis.activeFarmRankings) {
       const buyDisplay = crop.canBuy && crop.buyPrice !== null ? `\$${crop.buyPrice.toFixed(2)}` : 'Cannot buy';
-      const seedDisplay = crop.seedBuyPrice !== null ? `\$${crop.seedBuyPrice.toFixed(2)}` : 'N/A';
-      md += `| **${crop.crop}** | \$${crop.sellPrice.toFixed(2)} | ${buyDisplay} | ${seedDisplay} | \$${crop.returnPerHarvest.toFixed(2)} | \$${crop.estProfitPerInventory.toFixed(2)} |\n`;
+      const seedCostStr = crop.seedBuyPrice !== null ? `\$${crop.seedBuyPrice.toFixed(2)}` : 'Cannot buy';
+      md += `| **${crop.crop}** | \$${crop.sellPrice.toFixed(2)} | ${buyDisplay} | ${seedCostStr} | **\$${crop.full_inventory_sale_value.toLocaleString()}** | \$${crop.expected_gross_revenue_per_block.toFixed(2)} | \$${crop.expected_net_revenue_per_block.toFixed(2)} |\n`;
     }
     md += `\n`;
   }
 
-  if (analysis.spawnerAnalysis.length > 0) {
+  // 6. Spawner Break-Even Analysis
+  if (analysis.spawnerAnalysis && analysis.spawnerAnalysis.length > 0) {
     md += `## ⚡ Spawner Investment ROI\n`;
-    md += `Ranking of spawners based on fastest break-even time:\n\n`;
-    md += `| Spawner | Purchase Price | Drop Sells For | Hourly Revenue | Break-Even Time |\n`;
-    md += `|---|---|---|---|---|\n`;
+    md += `Ranking of spawners based on fastest payback period:\n\n`;
+    md += `| Spawner | Purchase Price | Drop Sells For | Hourly Revenue | Break-Even Payback | Return on Capital |\n`;
+    md += `|---|---|---|---|---|---|\n`;
     for (const sp of analysis.spawnerAnalysis) {
-      md += `| **${sp.mob}** | \$${sp.spawnerCost.toLocaleString()} | \$${sp.dropSellPrice.toFixed(2)} (${sp.dropName}) | \$${sp.hourlyRevenue.toFixed(2)}/hr | **${sp.hoursToBreakEven} hrs** |\n`;
+      md += `| **${sp.mob}** | \$${sp.spawnerCost.toLocaleString()} | \$${sp.dropSellPrice.toFixed(2)} (${sp.dropName}) | \$${sp.hourlyRevenue.toFixed(2)}/hr | **${sp.hoursToBreakEven} hrs** | ${sp.returnOnCapitalPerHourPct}%/hr |\n`;
     }
     md += `\n`;
   }
 
+  // 7. Top 10 Unique Items by Sale Price
+  if (analysis.topSellItems && analysis.topSellItems.length > 0) {
+    md += `## 💎 Top 10 Unique Items by Player Sale Price (Deduplicated)\n\n`;
+    md += `| Item | Best Player Sell Price | Best Player Buy Price | Total Listings | Found in Categories |\n`;
+    md += `|---|---|---|---|---|\n`;
+    for (const itm of analysis.topSellItems) {
+      const buyStr = itm.player_buy_price !== null ? `\$${itm.player_buy_price.toFixed(2)}` : 'N/A';
+      md += `| **${itm.name}** | **\$${itm.player_sell_price.toFixed(2)}** | ${buyStr} | ${itm.listing_count} | ${itm.categories.join(', ')} |\n`;
+    }
+    md += `\n`;
+  }
+
+  // 8. Strategic AI Wealth Roadmap
   if (aiResponse) {
     const aiText = typeof aiResponse === 'object' ? (aiResponse.text || JSON.stringify(aiResponse, null, 2)) : String(aiResponse);
     md += `## 🧠 Strategic AI Wealth Roadmap\n\n`;
