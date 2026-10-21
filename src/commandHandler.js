@@ -114,6 +114,25 @@ export class ActionExecutor {
           await this.botManager.performLobbySelection();
           break;
 
+        case 'crawl_shop':
+        case 'shop_scan':
+        case 'scan_shop':
+          this.botManager.emit('log', { type: 'action', text: `[Action] Starting shop crawl on order from ${sender}` });
+          if (this.botManager.shopCrawler) {
+            this.botManager.shopCrawler.startCrawl().catch(e => {
+              this.botManager.emit('log', { type: 'error', text: `Shop crawl error: ${e.message}` });
+            });
+          }
+          break;
+
+        case 'stop_shop':
+        case 'stop_crawl':
+          this.botManager.emit('log', { type: 'action', text: `[Action] Stopping shop crawl on order from ${sender}` });
+          if (this.botManager.shopCrawler) {
+            this.botManager.shopCrawler.stop();
+          }
+          break;
+
         default:
           console.log(`Unknown action: ${action}`);
       }

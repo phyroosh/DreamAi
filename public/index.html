@@ -15,6 +15,7 @@
     <div class="brand">⛏️ AFK Bot</div>
     <div class="header-actions">
       <div id="status-pill" class="status-pill disconnected">Disconnected</div>
+      <button id="btn-shop" class="btn btn-sm btn-shop-header" title="Shop Scraper & AI Wealth Analyzer">💰 Shop</button>
       <button id="btn-settings" class="btn btn-icon" title="Settings">⚙️</button>
       <button id="btn-disconnect" class="btn btn-danger hidden" title="Disconnect">🛑</button>
     </div>
@@ -399,6 +400,135 @@
           💡 <strong>Tips:</strong> Click any slot then another slot to <strong>swap</strong> them. Press <strong>1–9</strong> for hotbar, <strong>E</strong> for inventory, <strong>Q</strong> to drop held items.
         </div>
       </div>
+    </div>
+  </dialog>
+
+  <!-- Shop & AI Wealth Intelligence Modal -->
+  <dialog id="modal-shop" class="modal modal-wide">
+    <div class="modal-content shop-modal-content">
+      <div class="modal-header">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <span style="font-size:24px;">💰</span>
+          <div>
+            <h2 style="margin:0; font-size:16px;">Shop Scraper & AI Wealth Analyzer</h2>
+            <p style="margin:0; font-size:11px; color:var(--text-muted);">Extract /shop prices, find infinite money exploits & passive AFK farm ROI</p>
+          </div>
+        </div>
+        <button id="btn-close-shop" class="btn-close">×</button>
+      </div>
+
+      <!-- Controls & Crawl Action Bar -->
+      <div class="shop-control-bar">
+        <div class="shop-input-group">
+          <label>Command</label>
+          <input type="text" id="inp-shop-cmd" value="/shop" placeholder="/shop, /market">
+        </div>
+        <div class="shop-input-group">
+          <label>Click Speed</label>
+          <select id="sel-shop-speed">
+            <option value="1000" selected>Human (1000ms)</option>
+            <option value="1400">Safe (1400ms)</option>
+            <option value="750">Fast (750ms)</option>
+          </select>
+        </div>
+        <div class="shop-buttons-group">
+          <button type="button" id="btn-start-crawl" class="btn btn-primary btn-success">▶ Start Crawl</button>
+          <button type="button" id="btn-stop-crawl" class="btn btn-danger hidden">⏹ Stop</button>
+          <button type="button" id="btn-run-ai-wealth" class="btn btn-ai-wealth">🧠 AI Wealth Plan</button>
+          <button type="button" id="btn-copy-ai-prompt" class="btn btn-secondary" title="Copy markdown prompt for ChatGPT/Claude">📋 Copy for AI</button>
+          <button type="button" id="btn-export-shop-json" class="btn btn-secondary" title="Export catalog as JSON">⬇️ Export</button>
+        </div>
+      </div>
+
+      <!-- Live Crawl Progress Indicator -->
+      <div id="shop-progress-card" class="shop-progress-card hidden">
+        <div class="progress-info-row">
+          <span id="shop-progress-stage" class="progress-stage-text">Crawling /shop...</span>
+          <span id="shop-progress-count" class="progress-count-badge">0 items found</span>
+        </div>
+        <div class="progress-track">
+          <div id="shop-progress-bar" class="progress-fill" style="width: 0%;"></div>
+        </div>
+      </div>
+
+      <!-- Shop Navigation Tabs: Analysis vs Catalog Table -->
+      <div class="shop-tabs">
+        <button type="button" class="shop-tab active" data-tab="wealth">🚀 Wealth Blueprint & Exploits</button>
+        <button type="button" class="shop-tab" data-tab="catalog">📦 Scanned Catalog (<span id="badge-catalog-count">0</span>)</button>
+      </div>
+
+      <!-- Tab Content: Wealth Blueprint -->
+      <div id="shop-view-wealth" class="shop-tab-pane active">
+        <!-- Discovered Arbitrage / Exploit Banner (dynamic) -->
+        <div id="section-arbitrage" class="analytics-section">
+          <!-- Filled by JS -->
+        </div>
+
+        <!-- Passive & Active Farming Grid -->
+        <div class="analytics-grid">
+          <div class="analytics-card">
+            <div class="analytics-card-header">
+              <span class="card-icon">🌾</span>
+              <h4>Best Passive AFK Farms</h4>
+            </div>
+            <p class="analytics-card-desc">Zero player interaction: grows while bot stays AFK.</p>
+            <div id="list-passive-farms" class="analytics-list">
+              <div class="empty-text">No shop items scanned yet. Click "Start Crawl" to scan /shop!</div>
+            </div>
+          </div>
+
+          <div class="analytics-card">
+            <div class="analytics-card-header">
+              <span class="card-icon">⚡</span>
+              <h4>Spawner Investment ROI</h4>
+            </div>
+            <p class="analytics-card-desc">Hours of AFK grinding required to break even.</p>
+            <div id="list-spawners" class="analytics-list">
+              <div class="empty-text">No spawner prices detected yet.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- AI Wealth Roadmap Container -->
+        <div id="section-ai-roadmap" class="ai-roadmap-box hidden">
+          <div class="ai-roadmap-header">
+            <h4>🧠 Server Wealth Masterplan (Generated by AI)</h4>
+            <button type="button" id="btn-copy-roadmap" class="btn btn-secondary btn-sm">Copy Report</button>
+          </div>
+          <div id="ai-roadmap-content" class="ai-roadmap-content">
+            <!-- Rendered markdown/text -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab Content: Catalog Table -->
+      <div id="shop-view-catalog" class="shop-tab-pane hidden">
+        <div class="catalog-filters-bar">
+          <input type="text" id="inp-catalog-search" placeholder="Search items (e.g. cactus, iron, spawner)..." class="catalog-search">
+          <select id="sel-catalog-cat" class="catalog-category-select">
+            <option value="all">All Categories</option>
+          </select>
+          <label class="cb-label" style="font-size:11px; cursor:pointer;"><input type="checkbox" id="chk-sellable-only"> Sellable Only</label>
+          <label class="cb-label" style="font-size:11px; cursor:pointer;"><input type="checkbox" id="chk-buyable-only"> Buyable Only</label>
+        </div>
+        <div class="catalog-table-wrapper">
+          <table class="catalog-table">
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th>Category</th>
+                <th>Buy Price</th>
+                <th>Sell Price</th>
+                <th>Ratio / Margin</th>
+              </tr>
+            </thead>
+            <tbody id="catalog-table-body">
+              <tr><td colspan="5" style="text-align:center; padding: 24px; color:var(--text-muted);">No catalog items yet. Connect to a server and click "Start Crawl".</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
     </div>
   </dialog>
 

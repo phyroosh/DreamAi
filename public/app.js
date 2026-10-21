@@ -979,3 +979,411 @@ tabs.forEach(t => t.onclick = () => {
 });
 
 btnClear.onclick = () => { terminal.innerHTML = ''; };
+
+// ============================================================================
+// Shop Scraper & AI Wealth Intelligence Engine
+// ============================================================================
+const modalShop = document.getElementById('modal-shop');
+const btnShop = document.getElementById('btn-shop');
+const btnCloseShop = document.getElementById('btn-close-shop');
+const inpShopCmd = document.getElementById('inp-shop-cmd');
+const selShopSpeed = document.getElementById('sel-shop-speed');
+const btnStartCrawl = document.getElementById('btn-start-crawl');
+const btnStopCrawl = document.getElementById('btn-stop-crawl');
+const btnRunAiWealth = document.getElementById('btn-run-ai-wealth');
+const btnCopyAiPrompt = document.getElementById('btn-copy-ai-prompt');
+const btnExportShopJson = document.getElementById('btn-export-shop-json');
+
+const shopProgressCard = document.getElementById('shop-progress-card');
+const shopProgressStage = document.getElementById('shop-progress-stage');
+const shopProgressCount = document.getElementById('shop-progress-count');
+const shopProgressBar = document.getElementById('shop-progress-bar');
+const badgeCatalogCount = document.getElementById('badge-catalog-count');
+
+const shopTabs = document.querySelectorAll('.shop-tab');
+const shopViewWealth = document.getElementById('shop-view-wealth');
+const shopViewCatalog = document.getElementById('shop-view-catalog');
+
+const sectionArbitrage = document.getElementById('section-arbitrage');
+const listPassiveFarms = document.getElementById('list-passive-farms');
+const listSpawners = document.getElementById('list-spawners');
+const sectionAiRoadmap = document.getElementById('section-ai-roadmap');
+const aiRoadmapContent = document.getElementById('ai-roadmap-content');
+const btnCopyRoadmap = document.getElementById('btn-copy-roadmap');
+
+const inpCatalogSearch = document.getElementById('inp-catalog-search');
+const selCatalogCat = document.getElementById('sel-catalog-cat');
+const chkSellableOnly = document.getElementById('chk-sellable-only');
+const chkBuyableOnly = document.getElementById('chk-buyable-only');
+const catalogTableBody = document.getElementById('catalog-table-body');
+
+let activeCatalog = null;
+let activeAnalysis = null;
+let isShopCrawling = false;
+
+// Modal Controls
+if (btnShop && modalShop) {
+  btnShop.onclick = () => {
+    modalShop.showModal();
+    if (!activeCatalog) {
+      fetchLatestCatalog();
+    }
+  };
+}
+
+if (btnCloseShop && modalShop) {
+  btnCloseShop.onclick = () => modalShop.close();
+}
+
+// Tab Switching
+shopTabs.forEach(tab => {
+  tab.onclick = () => {
+    shopTabs.forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    const target = tab.dataset.tab;
+    if (target === 'wealth') {
+      shopViewWealth.classList.remove('hidden');
+      shopViewCatalog.classList.add('hidden');
+    } else {
+      shopViewWealth.classList.add('hidden');
+      shopViewCatalog.classList.remove('hidden');
+    }
+  };
+});
+
+// Fetch Latest Catalog from Server
+async function fetchLatestCatalog() {
+  try {
+    const res = await fetch('/api/shop/catalog');
+    if (res.ok) {
+      const data = await res.json();
+      activeCatalog = data.catalog;
+      activeAnalysis = data.analysis;
+      renderShopData();
+    }
+  } catch (err) {
+    console.warn('Could not fetch existing shop catalog:', err);
+  }
+}
+
+// Start Crawl
+if (btnStartCrawl) {
+  btnStartCrawl.onclick = () => {
+    const cmd = (inpShopCmd?.value || '/shop').trim();
+    const delay = parseInt(selShopSpeed?.value || '1000', 10);
+    
+    isShopCrawling = true;
+    btnStartCrawl.classList.add('hidden');
+    btnStopCrawl.classList.remove('hidden');
+    shopProgressCard.classList.remove('hidden');
+    shopProgressStage.textContent = `Starting crawl with ${cmd}...`;
+    shopProgressBar.style.width = '5%';
+    shopProgressCount.textContent = '0 items found';
+
+    socket.emit('shop:crawl', { command: cmd, delay });
+  };
+}
+
+// Stop Crawl
+if (btnStopCrawl) {
+  btnStopCrawl.onclick = () => {
+    socket.emit('shop:stop');
+    btnStopCrawl.textContent = 'Stopping...';
+  };
+}
+
+// Socket Crawl Events
+socket.on('shop:progress', (data) => {
+  isShopCrawling = true;
+  shopProgressCard.classList.remove('hidden');
+  btnStartCrawl.classList.add('hidden');
+  btnStopCrawl.classList.remove('hidden');
+  btnStopCrawl.textContent = '⏹ Stop';
+
+  shopProgressStage.textContent = `${data.stage}: ${data.detail || ''}`;
+  shopProgressBar.style.width = `${Math.min(100, Math.max(5, data.percent || 0))}%`;
+  shopProgressCount.textContent = `${data.itemsFound || 0} items found`;
+});
+
+socket.on('shop:complete', (catalog) => {
+  isShopCrawling = false;
+  btnStartCrawl.classList.remove('hidden');
+  btnStopCrawl.classList.add('hidden');
+  shopProgressBar.style.width = '100%';
+  shopProgressStage.textContent = `✅ Crawl completed! ${catalog.totalItems} items scanned.`;
+
+  setTimeout(() => {
+    shopProgressCard.classList.add('hidden');
+  }, 4000);
+
+  activeCatalog = catalog;
+  fetchLatestCatalog();
+});
+
+socket.on('shop:stopped', () => {
+  isShopCrawling = false;
+  btnStartCrawl.classList.remove('hidden');
+  btnStopCrawl.classList.add('hidden');
+  shopProgressCard.classList.add('hidden');
+});
+
+socket.on('shop:error', (data) => {
+  isShopCrawling = false;
+  btnStartCrawl.classList.remove('hidden');
+  btnStopCrawl.classList.add('hidden');
+  shopProgressStage.textContent = `⚠️ Error: ${data.message}`;
+  shopProgressBar.style.background = '#ef4444';
+});
+
+socket.on('shop:catalog', (catalog) => {
+  activeCatalog = catalog;
+  fetchLatestCatalog();
+});
+
+// Render Catalog & Wealth Analytics
+function renderShopData() {
+  if (!activeCatalog || !activeAnalysis) return;
+
+  const total = activeCatalog.totalItems || activeCatalog.items?.length || 0;
+  if (badgeCatalogCount) badgeCatalogCount.textContent = total;
+
+  // 1. Render Arbitrage / Exploit Alert
+  if (sectionArbitrage) {
+    if (activeAnalysis.arbitrageOpportunities && activeAnalysis.arbitrageOpportunities.length > 0) {
+      let arbHtml = `
+        <div class="arbitrage-card">
+          <div class="arbitrage-title">
+            <span>🚨</span>
+            <span>INFINITE MONEY ARBITRAGE DETECTED! (${activeAnalysis.arbitrageOpportunities.length} recipes)</span>
+          </div>
+          <p style="font-size:11px; margin:0; color:var(--text-muted);">
+            You can buy raw ingredients from /shop, craft these items, and sell them back for pure infinite profit loops:
+          </p>
+          <div style="display:flex; flex-direction:column; gap:6px;">
+      `;
+
+      for (const arb of activeAnalysis.arbitrageOpportunities) {
+        arbHtml += `
+          <div class="arbitrage-item-row">
+            <div>
+              <strong>${arb.recipeName}</strong>: Buy ingredients for <span style="color:#60a5fa;">$${arb.totalCost.toFixed(2)}</span> 
+              ➜ Sell ${arb.craftedCount}x ${arb.craftedItem} for <span style="color:#34d399;">$${arb.totalRevenue.toFixed(2)}</span>
+            </div>
+            <div class="arbitrage-badge">
+              +${arb.profitMarginPct.toFixed(0)}% (+$${arb.netProfitPerCraft.toFixed(2)} / craft)
+            </div>
+          </div>
+        `;
+      }
+
+      arbHtml += `</div></div>`;
+      sectionArbitrage.innerHTML = arbHtml;
+      sectionArbitrage.classList.remove('hidden');
+    } else {
+      sectionArbitrage.innerHTML = `
+        <div style="background:var(--bg-surface); border:1px solid var(--border); border-radius:var(--rad); padding:8px 12px; font-size:11px; color:var(--text-muted); display:flex; align-items:center; gap:8px;">
+          <span>⚖️</span>
+          <span><strong>Balanced Crafting Economy:</strong> No direct infinite crafting loops found in base items. Wealth will be driven by passive AFK farming and spawners below!</span>
+        </div>
+      `;
+      sectionArbitrage.classList.remove('hidden');
+    }
+  }
+
+  // 2. Render Passive AFK Farms
+  if (listPassiveFarms) {
+    if (activeAnalysis.passiveFarmRankings && activeAnalysis.passiveFarmRankings.length > 0) {
+      listPassiveFarms.innerHTML = activeAnalysis.passiveFarmRankings.map((crop, idx) => `
+        <div class="analytics-row">
+          <div class="analytics-name">
+            <span style="color:${idx === 0 ? '#fbbf24' : 'var(--text-muted)'}; font-weight:700;">#${idx + 1}</span>
+            <span>${crop.crop}</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="color:var(--text-muted); font-size:10px;">Sells @ $${crop.sellPrice.toFixed(2)}</span>
+            <span class="analytics-val">~$${crop.estHourlyProfitPer100Plots.toFixed(0)}/hr</span>
+          </div>
+        </div>
+      `).join('');
+    } else {
+      listPassiveFarms.innerHTML = `<div class="empty-text">No passive crops found in catalog.</div>`;
+    }
+  }
+
+  // 3. Render Spawners
+  if (listSpawners) {
+    if (activeAnalysis.spawnerAnalysis && activeAnalysis.spawnerAnalysis.length > 0) {
+      listSpawners.innerHTML = activeAnalysis.spawnerAnalysis.map((sp, idx) => `
+        <div class="analytics-row">
+          <div class="analytics-name">
+            <span style="color:${idx === 0 ? '#fbbf24' : 'var(--text-muted)'}; font-weight:700;">#${idx + 1}</span>
+            <span>${sp.mob} Spawner</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="color:var(--text-muted); font-size:10px;">Cost: $${sp.spawnerCost.toLocaleString()}</span>
+            <span class="analytics-val">${sp.hoursToBreakEven} hrs payback</span>
+          </div>
+        </div>
+      `).join('');
+    } else {
+      listSpawners.innerHTML = `<div class="empty-text">No spawner prices detected in catalog.</div>`;
+    }
+  }
+
+  // 4. Populate Category Select
+  if (selCatalogCat) {
+    const currentVal = selCatalogCat.value;
+    const cats = new Set(['all']);
+    (activeCatalog.categories || []).forEach(c => {
+      if (c && c.name) cats.add(c.name);
+    });
+
+    selCatalogCat.innerHTML = Array.from(cats).map(c => `
+      <option value="${c}">${c === 'all' ? 'All Categories' : c}</option>
+    `).join('');
+    selCatalogCat.value = cats.has(currentVal) ? currentVal : 'all';
+  }
+
+  // 5. Render Table
+  renderCatalogTable();
+}
+
+// Render Table with Filters
+function renderCatalogTable() {
+  if (!catalogTableBody || !activeCatalog) return;
+
+  const searchQuery = (inpCatalogSearch?.value || '').toLowerCase().trim();
+  const selectedCat = selCatalogCat?.value || 'all';
+  const sellableOnly = chkSellableOnly?.checked || false;
+  const buyableOnly = chkBuyableOnly?.checked || false;
+
+  let items = activeCatalog.items || [];
+  if (activeCatalog.categories && items.length === 0) {
+    items = activeCatalog.categories.flatMap(c => c.items || []);
+  }
+
+  const filtered = items.filter(item => {
+    if (!item) return false;
+    const name = (item.displayName || item.name || '').toLowerCase();
+    if (searchQuery && !name.includes(searchQuery)) return false;
+    if (sellableOnly && !item.canSell) return false;
+    if (buyableOnly && !item.canBuy) return false;
+    if (selectedCat !== 'all') {
+      const matchCat = (activeCatalog.categories || []).find(c => c.name === selectedCat);
+      if (matchCat && !(matchCat.items || []).some(ci => ci.slot === item.slot && ci.name === item.name)) {
+        return false;
+      }
+    }
+    return true;
+  });
+
+  if (filtered.length === 0) {
+    catalogTableBody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:24px; color:var(--text-muted);">No items matched the current filter.</td></tr>`;
+    return;
+  }
+
+  catalogTableBody.innerHTML = filtered.map(item => {
+    const buyStr = item.canBuy && typeof item.buyPrice === 'number' ? `$${item.buyPrice.toFixed(2)}` : '<span style="color:var(--text-muted);">N/A</span>';
+    const sellStr = item.canSell && typeof item.sellPrice === 'number' ? `$${item.sellPrice.toFixed(2)}` : '<span style="color:var(--text-muted);">N/A</span>';
+    
+    let ratioStr = '<span style="color:var(--text-muted);">--</span>';
+    if (item.canBuy && item.canSell && item.buyPrice > 0 && item.sellPrice > 0) {
+      const ratio = (item.sellPrice / item.buyPrice) * 100;
+      const color = ratio >= 50 ? '#34d399' : '#fbbf24';
+      ratioStr = `<span class="catalog-ratio-badge" style="color:${color};">${ratio.toFixed(0)}% return</span>`;
+    }
+
+    const catName = (activeCatalog.categories || []).find(c => (c.items || []).some(ci => ci.slot === item.slot && ci.name === item.name))?.name || 'General';
+
+    return `
+      <tr>
+        <td style="font-weight:600;">${item.displayName || item.name}</td>
+        <td style="color:var(--text-muted); font-size:10px;">${catName}</td>
+        <td class="catalog-price-buy">${buyStr}</td>
+        <td class="catalog-price-sell">${sellStr}</td>
+        <td>${ratioStr}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+// Table Filter Event Listeners
+if (inpCatalogSearch) inpCatalogSearch.oninput = renderCatalogTable;
+if (selCatalogCat) selCatalogCat.onchange = renderCatalogTable;
+if (chkSellableOnly) chkSellableOnly.onchange = renderCatalogTable;
+if (chkBuyableOnly) chkBuyableOnly.onchange = renderCatalogTable;
+
+// Run AI Wealth Plan
+if (btnRunAiWealth) {
+  btnRunAiWealth.onclick = async () => {
+    btnRunAiWealth.disabled = true;
+    btnRunAiWealth.textContent = '🧠 Analyzing with AI...';
+
+    try {
+      const res = await fetch('/api/shop/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to generate plan');
+
+      sectionAiRoadmap.classList.remove('hidden');
+      aiRoadmapContent.textContent = data.markdownReport || data.aiStrategy || 'Analysis complete.';
+      
+      // Auto-switch to wealth view
+      shopTabs[0].click();
+      sectionAiRoadmap.scrollIntoView({ behavior: 'smooth' });
+
+    } catch (err) {
+      alert(`AI Strategy error: ${err.message}`);
+    } finally {
+      btnRunAiWealth.disabled = false;
+      btnRunAiWealth.textContent = '🧠 AI Wealth Plan';
+    }
+  };
+}
+
+// Copy AI Prompt (for pasting into ChatGPT/Claude)
+if (btnCopyAiPrompt) {
+  btnCopyAiPrompt.onclick = async () => {
+    try {
+      const res = await fetch('/api/shop/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+      const data = await res.json();
+      const promptToCopy = data.aiPrompt || data.markdownReport;
+      if (promptToCopy) {
+        await navigator.clipboard.writeText(promptToCopy);
+        const prevText = btnCopyAiPrompt.textContent;
+        btnCopyAiPrompt.textContent = '✅ Copied!';
+        setTimeout(() => { btnCopyAiPrompt.textContent = prevText; }, 2000);
+      }
+    } catch (err) {
+      alert('Could not copy prompt: ' + err.message);
+    }
+  };
+}
+
+// Copy Roadmap Text
+if (btnCopyRoadmap) {
+  btnCopyRoadmap.onclick = async () => {
+    const text = aiRoadmapContent?.textContent;
+    if (text) {
+      await navigator.clipboard.writeText(text);
+      btnCopyRoadmap.textContent = '✅ Copied!';
+      setTimeout(() => { btnCopyRoadmap.textContent = 'Copy Report'; }, 2000);
+    }
+  };
+}
+
+// Export Catalog JSON
+if (btnExportShopJson) {
+  btnExportShopJson.onclick = () => {
+    window.open('/api/shop/export', '_blank');
+  };
+}
+

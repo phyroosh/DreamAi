@@ -9,6 +9,7 @@ import dns from 'dns';
 import mc from 'minecraft-protocol';
 import * as storage from './storage.js';
 import { BotManager } from './botManager.js';
+import { analyzeEconomy, generateAiPrompt, generateMarkdownReport } from './economyAnalyzer.js';
 
 dotenv.config();
 
@@ -70,6 +71,10 @@ botManager.on('chat', (msg) => io.emit('bot:chat', msg));
 botManager.on('log', (log) => io.emit('bot:log', log));
 botManager.on('settings', (settings) => io.emit('bot:settings', settings));
 botManager.on('inventory', (inv) => io.emit('bot:inventory', inv));
+botManager.on('shop:progress', (data) => io.emit('shop:progress', data));
+botManager.on('shop:complete', (catalog) => io.emit('shop:complete', catalog));
+botManager.on('shop:stopped', () => io.emit('shop:stopped'));
+botManager.on('shop:error', (data) => io.emit('shop:error', data));
 
 // API Routes
 app.get('/api/status', (req, res) => {
@@ -287,6 +292,97 @@ app.post('/api/bot/chat', (req, res) => {
   }
 });
 
+// Shop Scraper & AI Wealth Analyzer Endpoints
+app.post('/api/shop/crawl', async (req, res) => {
+  try {
+    const { command, delay } = req.body;
+    if (!botManager.shopCrawler) {
+      return res.status(400).json({ error: 'Shop crawler is not initialized' });
+    }
+    if (delay) botManager.shopCrawler.baseDelay = Math.max(500, parseInt(delay, 10));
+    botManager.shopCrawler.startCrawl(command).catch(err => {
+      console.warn('[ShopCrawler Error]', err.message);
+    });
+    res.json({ success: true, message: 'Shop crawl started' });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/shop/stop', async (req, res) => {
+  try {
+    if (botManager.shopCrawler) {
+      await botManager.shopCrawler.stop();
+    }
+    res.json({ success: true, message: 'Shop crawl stopped' });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/shop/catalog', (req, res) => {
+  const host = req.query.host || botManager.currentServer?.host;
+  const catalog = storage.getShopCatalog(host);
+  if (!catalog) {
+    return res.status(404).json({ error: 'No catalog found. Run a shop crawl first.' });
+  }
+  const analysis = analyzeEconomy(catalog);
+  res.json({ catalog, analysis });
+});
+
+app.post('/api/shop/analyze', async (req, res) => {
+  try {
+    const host = req.body.host || botManager.currentServer?.host;
+    const catalog = storage.getShopCatalog(host);
+    if (!catalog) {
+      return res.status(404).json({ error: 'No shop catalog found. Run a shop crawl first!' });
+    }
+
+    const analysis = analyzeEconomy(catalog);
+    let aiStrategy = null;
+
+    if (botManager.aiChat && botManager.aiChat.apiKey) {
+      const prompt = generateAiPrompt(catalog, analysis);
+      try {
+        const reply = await botManager.aiChat.getReply(
+          'Owner',
+          prompt,
+          `Server: ${catalog.server}`,
+          '',
+          (log) => botManager.emit('log', log)
+        );
+        aiStrategy = reply;
+      } catch (aiErr) {
+        console.warn('AI analysis call failed:', aiErr.message);
+      }
+    }
+
+    const markdownReport = generateMarkdownReport(analysis, aiStrategy);
+    const aiPrompt = generateAiPrompt(catalog, analysis);
+
+    res.json({
+      success: true,
+      analysis,
+      aiStrategy,
+      aiPrompt,
+      markdownReport
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/shop/export', (req, res) => {
+  const host = req.query.host || botManager.currentServer?.host;
+  const catalog = storage.getShopCatalog(host);
+  if (!catalog) {
+    return res.status(404).send('No shop catalog found.');
+  }
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Disposition', `attachment; filename="shop_${host || 'catalog'}.json"`);
+  res.send(JSON.stringify(catalog, null, 2));
+});
+
 // Socket.io Connection
 io.on('connection', (socket) => {
   // Send initial state on connection
@@ -294,6 +390,25 @@ io.on('connection', (socket) => {
   socket.emit('bot:inventory', botManager.getInventory());
   socket.emit('servers:updated', storage.getSavedServers());
   socket.emit('bot:settings', storage.getSettings());
+
+  const latestCat = storage.getShopCatalog(botManager.currentServer?.host);
+  if (latestCat) {
+    socket.emit('shop:catalog', latestCat);
+  }
+
+  socket.on('shop:crawl', (data) => {
+    if (botManager.shopCrawler) {
+      botManager.shopCrawler.startCrawl(data?.command).catch(e => {
+        socket.emit('shop:error', { message: e.message });
+      });
+    }
+  });
+
+  socket.on('shop:stop', () => {
+    if (botManager.shopCrawler) {
+      botManager.shopCrawler.stop();
+    }
+  });
 
   socket.on('bot:connect', (data) => botManager.connect(data));
   socket.on('bot:disconnect', () => botManager.disconnect());

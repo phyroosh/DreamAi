@@ -4,6 +4,7 @@ import dns from 'dns';
 import net from 'net';
 import { AiChatHandler } from './aiChat.js';
 import { ActionExecutor } from './commandHandler.js';
+import { ShopCrawler } from './shopCrawler.js';
 
 export const STATES = Object.freeze({
   INITIALIZING: 'INITIALIZING',
@@ -75,6 +76,16 @@ export class BotManager extends EventEmitter {
       targetUser: this.trustedPlayer
     });
     this.actionExecutor = new ActionExecutor(this);
+
+    // Shop GUI Crawler & Price Extractor
+    this.shopCrawler = new ShopCrawler(this);
+    this.shopCrawler.on('progress', (data) => this.emit('shop:progress', data));
+    this.shopCrawler.on('complete', (catalog) => {
+      this.storage?.saveShopCatalog?.(this.currentServer?.host, catalog);
+      this.emit('shop:complete', catalog);
+    });
+    this.shopCrawler.on('stopped', () => this.emit('shop:stopped'));
+    this.shopCrawler.on('error', (err) => this.emit('shop:error', { message: err?.message || String(err) }));
 
     // Rolling buffer of recent system logs (last 100)
     this.systemLogs = [];
@@ -1406,6 +1417,28 @@ export class BotManager extends EventEmitter {
 
     if (!isPermitted || !hasTriggerWord) return;
 
+    // Quick direct in-game commands for permitted players
+    if (cleanMsg === '!crawlshop' || cleanMsg === '!scan shop' || cleanMsg === '!shopscan') {
+      if (this.shopCrawler) {
+        this.shopCrawler.startCrawl().catch(e => {
+          this.emit('log', { type: 'error', text: `Shop crawl error: ${e.message}` });
+        });
+        const reply = "Started crawling /shop! I will explore all categories and collect prices.";
+        if (shouldWhisperReply) this.bot.chat(`/tell ${sender} ${reply}`);
+        else this.bot.chat(reply);
+        return;
+      }
+    }
+    if (cleanMsg === '!stopshop' || cleanMsg === '!stopcrawl') {
+      if (this.shopCrawler) {
+        this.shopCrawler.stop();
+        const reply = "Stopped shop crawl.";
+        if (shouldWhisperReply) this.bot.chat(`/tell ${sender} ${reply}`);
+        else this.bot.chat(reply);
+        return;
+      }
+    }
+
     const channelTag = shouldWhisperReply ? '[Private Whisper]' : '[Public Chat]';
     const logLabel = team && sender.toLowerCase() !== team.toLowerCase()
       ? `${sender} [Team: ${team}]`
@@ -1630,6 +1663,9 @@ export class BotManager extends EventEmitter {
   }
 
   cleanup(isManual = false) {
+    if (this.shopCrawler && this.shopCrawler.isCrawling) {
+      this.shopCrawler.stop();
+    }
     this.isRoaming = false;
     this.isEating = false;
     this.stopRightClickHold();

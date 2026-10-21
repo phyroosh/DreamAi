@@ -169,3 +169,47 @@ export function deleteServer(id) {
     throw err;
   }
 }
+
+const SHOPS_DIR = path.join(DATA_DIR, 'shops');
+if (!fs.existsSync(SHOPS_DIR)) {
+  fs.mkdirSync(SHOPS_DIR, { recursive: true });
+}
+
+export function saveShopCatalog(serverHost, catalogData) {
+  try {
+    const safeHost = String(serverHost || 'default').replace(/[^a-zA-Z0-9_\-\.]/g, '_');
+    const hostFile = path.join(SHOPS_DIR, `${safeHost}.json`);
+    const latestFile = path.join(SHOPS_DIR, 'latest.json');
+    const payload = JSON.stringify(catalogData, null, 2);
+
+    fs.writeFileSync(hostFile, payload);
+    fs.writeFileSync(latestFile, payload);
+    return true;
+  } catch (err) {
+    console.error('Error saving shop catalog:', err);
+    return false;
+  }
+}
+
+export function getShopCatalog(serverHost = null) {
+  try {
+    if (serverHost) {
+      const safeHost = String(serverHost).replace(/[^a-zA-Z0-9_\-\.]/g, '_');
+      const hostFile = path.join(SHOPS_DIR, `${safeHost}.json`);
+      if (fs.existsSync(hostFile)) {
+        return JSON.parse(fs.readFileSync(hostFile, 'utf8'));
+      }
+    }
+
+    const latestFile = path.join(SHOPS_DIR, 'latest.json');
+    if (fs.existsSync(latestFile)) {
+      return JSON.parse(fs.readFileSync(latestFile, 'utf8'));
+    }
+
+    return null;
+  } catch (err) {
+    console.error('Error loading shop catalog:', err);
+    return null;
+  }
+}
+
