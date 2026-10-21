@@ -554,7 +554,8 @@ export class BotManager extends EventEmitter {
       username,
       auth: 'offline',
       skipValidation: true,
-      checkTimeoutInterval: 45000
+      keepAlive: false, // Prevents minecraft-protocol from running internal suicide timeout timer
+      checkTimeoutInterval: 120000
     };
 
     if (version && version !== 'auto') {
@@ -588,6 +589,19 @@ export class BotManager extends EventEmitter {
       currentBot.once('kicked', clearIfCurrent);
 
       if (currentBot._client) {
+        // Bulletproof Keep-Alive Handler:
+        // Always respond immediately to server keep_alive packets so the server never kicks us,
+        // without any artificial client-side suicide timeout.
+        currentBot._client.on('keep_alive', (packet) => {
+          try {
+            currentBot._client.write('keep_alive', {
+              keepAliveId: packet.keepAliveId
+            });
+          } catch (e) {
+            // Socket in closure state
+          }
+        });
+
         currentBot._client.once('connect', () => {
           this.emit('log', { type: 'system', text: '[CONNECT] TCP socket connection established.' });
           if (currentBot._client.socket) {
@@ -1687,10 +1701,12 @@ export class BotManager extends EventEmitter {
         this.bot.clearControlStates();
       } catch (e) {}
       try {
-        this.bot.removeAllListeners();
         if (this.bot._client) {
           this.bot._client.removeAllListeners();
+          this.bot._client.on('error', () => {}); // Absorb trailing socket closure errors
         }
+        this.bot.removeAllListeners();
+        this.bot.on('error', () => {}); // Absorb trailing bot closure errors
         this.bot.quit();
       } catch (e) {}
       this.bot = null;

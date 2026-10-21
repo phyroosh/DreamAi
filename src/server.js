@@ -44,8 +44,9 @@ process.on('uncaughtException', (err) => {
     return;
   }
   console.warn('[Server Guard] Caught exception:', msg);
-  botManager.emit('log', { type: 'error', text: `Connection/Network error: ${msg}` });
+  botManager.emit('log', { type: 'error', text: `Connection/Network error: ${msg}. Initiating automatic recovery...` });
   botManager.cleanup();
+  botManager.scheduleReconnect();
 });
 
 process.on('unhandledRejection', (reason) => {
@@ -61,8 +62,9 @@ process.on('unhandledRejection', (reason) => {
     return;
   }
   console.warn('[Server Guard] Unhandled rejection:', msg);
-  botManager.emit('log', { type: 'error', text: `Connection rejection: ${msg}` });
+  botManager.emit('log', { type: 'error', text: `Connection rejection: ${msg}. Initiating automatic recovery...` });
   botManager.cleanup();
+  botManager.scheduleReconnect();
 });
 
 // Wire Bot Events to WebSockets
