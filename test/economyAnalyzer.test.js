@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import {
   analyzeEconomy,
   generateAiPrompt,
-  generateMarkdownReport
+  generateMarkdownReport,
+  findItem
 } from '../src/economyAnalyzer.js';
 
 describe('Economy Analyzer - Arbitrage & ROI Intelligence', () => {
@@ -66,4 +67,75 @@ describe('Economy Analyzer - Arbitrage & ROI Intelligence', () => {
     assert.ok(report.includes('INFINITE MONEY ARBITRAGE DETECTED'));
     assert.ok(report.includes('Phase 1: Start with wood arbitrage.'));
   });
+
+  test('5. findItem enforces strict identifier matching and forbids partial prefix false-positives', () => {
+    const sampleItems = [
+      { name: 'melon_slice', displayName: 'Melon Slice' },
+      { name: 'melon_seeds', displayName: 'Melon Seeds' },
+      { name: 'wheat_seeds', displayName: 'Wheat Seeds' },
+      { name: 'wheat', displayName: 'Wheat' },
+      { name: 'oak_log', displayName: 'Oak Log' }
+    ];
+
+    // 'melon' should NOT match 'melon_slice' or 'melon_seeds'
+    const foundMelon = findItem(sampleItems, 'melon');
+    assert.equal(foundMelon, undefined, 'findItem(melon) must not match melon_slice');
+
+    // 'melon_slice' should match exactly
+    const foundSlice = findItem(sampleItems, 'melon_slice');
+    assert.ok(foundSlice);
+    assert.equal(foundSlice.name, 'melon_slice');
+
+    // 'wheat' should match 'wheat', not 'wheat_seeds'
+    const foundWheat = findItem(sampleItems, 'wheat');
+    assert.ok(foundWheat);
+    assert.equal(foundWheat.name, 'wheat');
+
+    // 'log' should match 'oak_log'
+    const foundLog = findItem(sampleItems, 'log');
+    assert.ok(foundLog);
+    assert.equal(foundLog.name, 'oak_log');
+  });
+
+  test('6. Melon Block vs Slice clarification and dual Buy/Sell reporting in prompt & report', () => {
+    const catalogWithMelons = {
+      server: 'paid34.skilloraclouds.com',
+      items: [
+        { name: 'melon_slice', displayName: 'Melon Slice', buyPrice: 4.0, sellPrice: 2.0, canBuy: true, canSell: true },
+        { name: 'melon_seeds', displayName: 'Melon Seeds', buyPrice: 4.0, sellPrice: 2.0, canBuy: true, canSell: true },
+        { name: 'pumpkin', displayName: 'Pumpkin', buyPrice: null, sellPrice: 10.0, canBuy: false, canSell: true },
+        { name: 'pumpkin_seeds', displayName: 'Pumpkin Seeds', buyPrice: 2.0, sellPrice: 1.0, canBuy: true, canSell: true }
+      ]
+    };
+
+    const analysis = analyzeEconomy(catalogWithMelons);
+    assert.ok(analysis.melonClarification, 'Should produce melonClarification when block is missing');
+    assert.equal(analysis.melonClarification.sliceSellPrice, 2.0);
+    assert.equal(analysis.melonClarification.sliceBuyPrice, 4.0);
+
+    const melonSliceCrop = analysis.passiveFarmRankings.find(c => c.name === 'melon_slice');
+    assert.ok(melonSliceCrop);
+    assert.equal(melonSliceCrop.canBuy, true);
+    assert.equal(melonSliceCrop.buyPrice, 4.0);
+    assert.equal(melonSliceCrop.sellPrice, 2.0);
+    assert.equal(melonSliceCrop.seedBuyPrice, 4.0);
+
+    const pumpkinCrop = analysis.passiveFarmRankings.find(c => c.name === 'pumpkin');
+    assert.ok(pumpkinCrop);
+    assert.equal(pumpkinCrop.canBuy, false);
+    assert.equal(pumpkinCrop.buyPrice, null);
+    assert.equal(pumpkinCrop.seedBuyPrice, 2.0);
+
+    const prompt = generateAiPrompt(catalogWithMelons, analysis);
+    assert.ok(prompt.includes('Item Economics Clarification (Melon Block vs Melon Slice)'));
+    assert.ok(prompt.includes('Melon Slice'));
+    assert.ok(prompt.includes('Shop Buy: $4.00'));
+    assert.ok(prompt.includes('Shop Buy: Cannot buy directly'));
+
+    const report = generateMarkdownReport(analysis);
+    assert.ok(report.includes('Melon Block vs Melon Slice Shop Economics'));
+    assert.ok(report.includes('Shop Buy Price'));
+    assert.ok(report.includes('Seed Buy Price'));
+  });
 });
+

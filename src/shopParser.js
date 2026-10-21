@@ -212,6 +212,7 @@ export function parsePricesFromLore(rawLoreLines = [], displayName = '') {
   let canBuy = false;
   let canSell = false;
   let unit = 1;
+  let isTradeItem = false;
 
   // Clean all lines from colors and formatting codes
   const loreLines = (Array.isArray(rawLoreLines) ? rawLoreLines : [rawLoreLines])
@@ -220,95 +221,192 @@ export function parsePricesFromLore(rawLoreLines = [], displayName = '') {
 
   const fullText = loreLines.join('\n');
 
-  // Check for unsellable indicators
-  const isUnsellable = /cannot be sold|not sellable|unsellable|cannot sell/i.test(fullText);
-  // Check for unbuyable indicators
-  const isUnbuyable = /cannot be bought|not for sale|unbuyable|cannot buy/i.test(fullText);
+  // Check if lore contains explicit trade/price indications
+  const tradeIndications = /buy\s*price|sell\s*price|purchase\s*price|cannot be bought|cannot be sold|not for sale|not sellable|unsellable|unbuyable|not purchasable|(?:left|right)[\s\-]*click to (?:buy|sell)|shift\s*\+?\s*right\s*click to sell/i;
+  if (tradeIndications.test(fullText)) {
+    isTradeItem = true;
+  }
+
+  // Section tracking: 'buy', 'sell', 'usage', 'other'
+  let currentSection = null;
 
   for (let i = 0; i < loreLines.length; i++) {
     const cleanLine = loreLines[i];
     const lower = cleanLine.toLowerCase();
 
-    // 1. Check Buy Price Patterns
-    // Examples: "Buy: $15.00", "Buy Price" -> "■ $10.00", "Buy 1 for $10", "Buy 1x: $10", "Price: $50"
-    if (!isUnbuyable && (lower.includes('buy') || lower.includes('cost') || lower.includes('purchase'))) {
-      // Same-line buy 64x pattern: "Buy 64x: $640" or "Buy 64 for: $640"
-      const stackMatch = cleanLine.match(/buy\s*(?:for\s*)?(\d+)[x\s]+(?:for|:)?\s*[$€£]?\s*([0-9,]+(?:\.[0-9]+)?[km]?)/i);
-      if (stackMatch) {
-        const qty = parseInt(stackMatch[1], 10);
-        const total = parsePriceValue(stackMatch[2]);
-        if (qty > 0 && total !== null) {
-          buyPrice = total / qty;
-          canBuy = true;
-          unit = 1;
-        }
+    // Section header detection
+    if (/^(?:buy|cost|purchase)(?:\s*price)?[:\-]?$/i.test(cleanLine.trim())) {
+      currentSection = 'buy';
+      isTradeItem = true;
+      continue;
+    }
+    if (/^(?:sell|payout)(?:\s*price)?[:\-]?$/i.test(cleanLine.trim())) {
+      currentSection = 'sell';
+      isTradeItem = true;
+      continue;
+    }
+    if (/^(?:usage|click|info|description|requirements|lore)[:\-]?$/i.test(cleanLine.trim())) {
+      currentSection = 'other';
+      continue;
+    }
+
+    // Check if line is within BUY section
+    if (currentSection === 'buy') {
+      if (/cannot be bought|not for sale|unbuyable|cannot buy|not purchasable|\bn\/?a\b|none|disabled/i.test(lower)) {
+        buyPrice = null;
+        canBuy = false;
+        isTradeItem = true;
       } else {
-        // Standard single item buy on same line: "Buy: $10.00", "Buy 1: $10", "Buy Price: $10"
-        const singleMatch = cleanLine.match(/(?:buy|cost|purchase)(?:\s*(?:price|1x|1|each|per\s*item))?\s*[:\-]?\s*[$€£]?\s*([0-9,]+(?:\.[0-9]+)?[km]?)/i);
-        if (singleMatch) {
-          const val = parsePriceValue(singleMatch[1]);
+        const match = cleanLine.match(/[$€£]\s*([0-9,]+(?:\.[0-9]+)?[km]?)/i) ||
+                      cleanLine.match(/^[■•\-*\s]*[$€£]?\s*([0-9,]+(?:\.[0-9]+)?[km]?)/i);
+        if (match) {
+          const val = parsePriceValue(match[1]);
           if (val !== null) {
             buyPrice = val;
             canBuy = true;
+            isTradeItem = true;
           }
         }
       }
+      continue;
+    }
 
-      // Check multi-line pattern ONLY if same line did not contain a price
-      if (buyPrice === null && i + 1 < loreLines.length) {
-        const nextLine = loreLines[i + 1];
-        if (!/^(?:sell|usage|click|lore|description)/i.test(nextLine)) {
-          const nextMatch = nextLine.match(/[$€£]\s*([0-9,]+(?:\.[0-9]+)?[km]?)/i) ||
-                            nextLine.match(/^[■•\-*\s]*[$€£]?\s*([0-9,]+(?:\.[0-9]+)?[km]?)/i);
-          if (nextMatch) {
-            const val = parsePriceValue(nextMatch[1]);
+    // Check if line is within SELL section
+    if (currentSection === 'sell') {
+      if (/cannot be sold|not sellable|unsellable|cannot sell|\bn\/?a\b|none|disabled|not for sale/i.test(lower)) {
+        sellPrice = null;
+        canSell = false;
+        isTradeItem = true;
+      } else {
+        const match = cleanLine.match(/[$€£]\s*([0-9,]+(?:\.[0-9]+)?[km]?)/i) ||
+                      cleanLine.match(/^[■•\-*\s]*[$€£]?\s*([0-9,]+(?:\.[0-9]+)?[km]?)/i);
+        if (match) {
+          const val = parsePriceValue(match[1]);
+          if (val !== null) {
+            sellPrice = val;
+            canSell = true;
+            isTradeItem = true;
+          }
+        }
+      }
+      continue;
+    }
+
+    // Single-line or Inline Buy checks (e.g. "Buy: $10.00", "Buy: Cannot be bought", "Buy 64x: $640")
+    if (lower.includes('buy') || lower.includes('cost') || lower.includes('purchase')) {
+      isTradeItem = true;
+      if (/cannot be bought|not for sale|unbuyable|cannot buy|not purchasable|\bn\/?a\b|none|disabled/i.test(lower)) {
+        buyPrice = null;
+        canBuy = false;
+      } else {
+        // Same-line buy 64x pattern: "Buy 64x: $640" or "Buy 64 for: $640"
+        const stackMatch = cleanLine.match(/buy\s*(?:for\s*)?(\d+)[x\s]+(?:for|:)?\s*[$€£]?\s*([0-9,]+(?:\.[0-9]+)?[km]?)/i);
+        if (stackMatch) {
+          const qty = parseInt(stackMatch[1], 10);
+          const total = parsePriceValue(stackMatch[2]);
+          if (qty > 0 && total !== null) {
+            buyPrice = total / qty;
+            canBuy = true;
+            unit = 1;
+          }
+        } else {
+          // Standard single item buy on same line: "Buy: $10.00", "Buy 1: $10", "Buy Price: $10"
+          const singleMatch = cleanLine.match(/(?:buy|cost|purchase)(?:\s*(?:price|1x|1|each|per\s*item))?\s*[:\-]?\s*[$€£]?\s*([0-9,]+(?:\.[0-9]+)?[km]?)/i);
+          if (singleMatch) {
+            const val = parsePriceValue(singleMatch[1]);
             if (val !== null) {
               buyPrice = val;
               canBuy = true;
             }
           }
         }
-      }
-    }
 
-    // 2. Check Sell Price Patterns
-    // Examples: "Sell: $2.50", "Sell Price" -> "■ $5.00", "Sell 1 for $3", "Sell 1x: $3", "Payout: $2.50"
-    if (!isUnsellable && (lower.includes('sell') || lower.includes('payout'))) {
-      // Same-line sell 64x pattern: "Sell 64x: $160" or "Sell 64 for: $160"
-      const stackMatch = cleanLine.match(/sell\s*(?:for\s*)?(\d+)[x\s]+(?:for|:)?\s*[$€£]?\s*([0-9,]+(?:\.[0-9]+)?[km]?)/i);
-      if (stackMatch) {
-        const qty = parseInt(stackMatch[1], 10);
-        const total = parsePriceValue(stackMatch[2]);
-        if (qty > 0 && total !== null) {
-          sellPrice = total / qty;
-          canSell = true;
-        }
-      } else {
-        // Standard single item sell on same line: "Sell: $2.50", "Sell 1: $2.50", "Sell Price: $2.50"
-        const singleMatch = cleanLine.match(/(?:sell|payout)(?:\s*(?:price|1x|1|each|per\s*item))?\s*[:\-]?\s*[$€£]?\s*([0-9,]+(?:\.[0-9]+)?[km]?)/i);
-        if (singleMatch) {
-          const val = parsePriceValue(singleMatch[1]);
-          if (val !== null) {
-            sellPrice = val;
-            canSell = true;
+        // Multi-line peek if same line didn't contain price and wasn't explicit unbuyable
+        if (buyPrice === null && i + 1 < loreLines.length) {
+          const nextLine = loreLines[i + 1];
+          if (!/^(?:sell|usage|click|lore|description)/i.test(nextLine)) {
+            if (/cannot be bought|not for sale|unbuyable|cannot buy|\bn\/?a\b/i.test(nextLine)) {
+              buyPrice = null;
+              canBuy = false;
+            } else {
+              const nextMatch = nextLine.match(/[$€£]\s*([0-9,]+(?:\.[0-9]+)?[km]?)/i) ||
+                                nextLine.match(/^[■•\-*\s]*[$€£]?\s*([0-9,]+(?:\.[0-9]+)?[km]?)/i);
+              if (nextMatch) {
+                const val = parsePriceValue(nextMatch[1]);
+                if (val !== null) {
+                  buyPrice = val;
+                  canBuy = true;
+                }
+              }
+            }
           }
         }
       }
+    }
 
-      // Check multi-line pattern ONLY if same line did not contain a price
-      if (sellPrice === null && i + 1 < loreLines.length) {
-        const nextLine = loreLines[i + 1];
-        if (!/^(?:buy|usage|click|lore|description)/i.test(nextLine)) {
-          const nextMatch = nextLine.match(/[$€£]\s*([0-9,]+(?:\.[0-9]+)?[km]?)/i) ||
-                            nextLine.match(/^[■•\-*\s]*[$€£]?\s*([0-9,]+(?:\.[0-9]+)?[km]?)/i);
-          if (nextMatch) {
-            const val = parsePriceValue(nextMatch[1]);
+    // Single-line or Inline Sell checks (e.g. "Sell: $2.50", "Sell: Cannot be sold", "Sell 64x: $160")
+    if (lower.includes('sell') || lower.includes('payout')) {
+      isTradeItem = true;
+      if (/cannot be sold|not sellable|unsellable|cannot sell|\bn\/?a\b|none|disabled|not for sale/i.test(lower)) {
+        sellPrice = null;
+        canSell = false;
+      } else {
+        // Same-line sell 64x pattern: "Sell 64x: $160" or "Sell 64 for: $160"
+        const stackMatch = cleanLine.match(/sell\s*(?:for\s*)?(\d+)[x\s]+(?:for|:)?\s*[$€£]?\s*([0-9,]+(?:\.[0-9]+)?[km]?)/i);
+        if (stackMatch) {
+          const qty = parseInt(stackMatch[1], 10);
+          const total = parsePriceValue(stackMatch[2]);
+          if (qty > 0 && total !== null) {
+            sellPrice = total / qty;
+            canSell = true;
+          }
+        } else {
+          // Standard single item sell on same line: "Sell: $2.50", "Sell 1: $2.50", "Sell Price: $2.50"
+          const singleMatch = cleanLine.match(/(?:sell|payout)(?:\s*(?:price|1x|1|each|per\s*item))?\s*[:\-]?\s*[$€£]?\s*([0-9,]+(?:\.[0-9]+)?[km]?)/i);
+          if (singleMatch) {
+            const val = parsePriceValue(singleMatch[1]);
             if (val !== null) {
               sellPrice = val;
               canSell = true;
             }
           }
         }
+
+        // Multi-line peek if same line didn't contain price
+        if (sellPrice === null && i + 1 < loreLines.length) {
+          const nextLine = loreLines[i + 1];
+          if (!/^(?:buy|usage|click|lore|description)/i.test(nextLine)) {
+            if (/cannot be sold|not sellable|unsellable|cannot sell|\bn\/?a\b/i.test(nextLine)) {
+              sellPrice = null;
+              canSell = false;
+            } else {
+              const nextMatch = nextLine.match(/[$€£]\s*([0-9,]+(?:\.[0-9]+)?[km]?)/i) ||
+                                nextLine.match(/^[■•\-*\s]*[$€£]?\s*([0-9,]+(?:\.[0-9]+)?[km]?)/i);
+              if (nextMatch) {
+                const val = parsePriceValue(nextMatch[1]);
+                if (val !== null) {
+                  sellPrice = val;
+                  canSell = true;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Standalone unbuyable / unsellable phrases
+    if (/cannot be sold|not sellable|unsellable|cannot sell/i.test(lower)) {
+      sellPrice = null;
+      canSell = false;
+      isTradeItem = true;
+    }
+    if (/cannot be bought|not for sale|unbuyable|cannot buy|not purchasable/i.test(lower)) {
+      // If line only mentions bought/buy/purchasable
+      if (!lower.includes('sold') && !lower.includes('sell')) {
+        buyPrice = null;
+        canBuy = false;
+        isTradeItem = true;
       }
     }
   }
@@ -321,17 +419,13 @@ export function parsePricesFromLore(rawLoreLines = [], displayName = '') {
       if (val !== null) {
         buyPrice = val;
         canBuy = true;
+        isTradeItem = true;
       }
     }
   }
 
-  if (isUnsellable) {
-    sellPrice = null;
-    canSell = false;
-  }
-  if (isUnbuyable) {
-    buyPrice = null;
-    canBuy = false;
+  if (canBuy || canSell) {
+    isTradeItem = true;
   }
 
   return {
@@ -339,7 +433,8 @@ export function parsePricesFromLore(rawLoreLines = [], displayName = '') {
     sellPrice,
     canBuy,
     canSell,
-    unit
+    unit,
+    isTradeItem
   };
 }
 
@@ -431,9 +526,9 @@ export function classifyItem(item, slotIndex, windowTitle = '') {
     };
   }
 
-  // 3. Check for shop item prices
+  // 3. Check for shop item prices and trade indicators
   const priceInfo = parsePricesFromLore(lore, displayName);
-  if (priceInfo.canBuy || priceInfo.canSell) {
+  if (priceInfo.canBuy || priceInfo.canSell || priceInfo.isTradeItem) {
     return {
       type: 'shop_item',
       slot: slotIndex,

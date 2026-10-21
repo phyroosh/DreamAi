@@ -184,5 +184,58 @@ describe('Shop Parser - Minecraft GUI Price & Item Extraction', () => {
     assert.equal(classified.buyPrice, 10.0);
     assert.equal(classified.sellPrice, 5.0);
   });
+
+  test('10. parsePricesFromLore and classifyItem correctly handle unbuyable (sell-only) items', () => {
+    const lore = [
+      'Buy Price',
+      '■ Cannot be bought',
+      'Sell Price',
+      '■ $2.00',
+      'Usage:',
+      '╚» Shift + Right Click to sell all',
+      '╚» Right click to sell'
+    ];
+    const res = parsePricesFromLore(lore, 'Glowstone Dust');
+    assert.equal(res.canBuy, false);
+    assert.equal(res.buyPrice, null);
+    assert.equal(res.canSell, true);
+    assert.equal(res.sellPrice, 2.0);
+
+    const item = {
+      name: 'glowstone_dust',
+      displayName: 'Glowstone Dust',
+      customLore: lore
+    };
+    const classified = classifyItem(item, 9, 'Farming');
+    assert.equal(classified.type, 'shop_item');
+    assert.equal(classified.canBuy, false);
+    assert.equal(classified.canSell, true);
+  });
+
+  test('11. Items that cannot be bought AND cannot be sold are classified as shop_item, never category', () => {
+    const lore = [
+      'Buy Price',
+      '■ Cannot be bought',
+      'Sell Price',
+      '■ Cannot be sold',
+      'Display Item Only'
+    ];
+    const res = parsePricesFromLore(lore, 'Trophy Block');
+    assert.equal(res.canBuy, false);
+    assert.equal(res.canSell, false);
+    assert.equal(res.buyPrice, null);
+    assert.equal(res.sellPrice, null);
+    assert.equal(res.isTradeItem, true);
+
+    const item = {
+      name: 'dragon_egg',
+      displayName: 'Trophy Block',
+      customLore: lore
+    };
+    const classified = classifyItem(item, 22, 'Special');
+    assert.equal(classified.type, 'shop_item');
+    assert.notEqual(classified.type, 'category');
+  });
 });
+
 
