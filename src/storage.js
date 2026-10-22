@@ -232,7 +232,7 @@ export const DEFAULT_BOTS = [
   {
     id: 'bot_monalisa',
     name: 'MONALISA__',
-    username: 'MONALISA__',
+    username: 'MONALISA_99',
     loginPassword: process.env.DEFAULT_PASSWORD || '209801',
     autoLogin: true,
     host: 'paid34.skilloraclouds.com',
@@ -265,7 +265,7 @@ export function getBots() {
 
 export function getBot(id) {
   const bots = getBots();
-  return bots.find(b => b.id === id || b.username.toLowerCase() === String(id).toLowerCase()) || null;
+  return bots.find(b => b.id === id || b.username.toLowerCase() === String(id).toLowerCase() || (b.name && b.name.toLowerCase() === String(id).toLowerCase())) || null;
 }
 
 export function saveBot(botData) {
@@ -306,7 +306,8 @@ export function saveBot(botData) {
 export function deleteBot(id) {
   try {
     const bots = getBots();
-    const filtered = bots.filter(b => b.id !== id && b.username.toLowerCase() !== String(id).toLowerCase());
+    const cleanId = String(id).toLowerCase();
+    const filtered = bots.filter(b => b.id !== id && b.username.toLowerCase() !== cleanId && (!b.name || b.name.toLowerCase() !== cleanId));
     fs.writeFileSync(BOTS_FILE, JSON.stringify(filtered, null, 2));
     return filtered;
   } catch (err) {

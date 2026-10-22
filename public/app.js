@@ -801,7 +801,7 @@ function updateInventoryUI(inv) {
 function updateStatusUI(st) {
   if (!st) return;
   const targetBot = activeBots.find(b => b.id === (st.botId || activeBotId));
-  const botLabel = st.username || targetBot?.name || 'Bot';
+  const botLabel = targetBot?.name || st.botName || st.username || 'Bot';
   elStatus.textContent = `${botLabel}: ${st.state}`;
   elStatus.className = `status-pill ${st.state.toLowerCase()}`;
   

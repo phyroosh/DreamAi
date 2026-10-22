@@ -1378,6 +1378,40 @@ export class BotManager extends EventEmitter {
       if (lower.includes('already logged in') || lower.includes('already connected') || lower.includes('another location') || lower.includes('logged in from')) {
         customDelay = 22; // Wait 22s for ghost session to expire on server
         this.emit('log', { type: 'warn', text: `[SERVER] Ghost session detected (${kickReason}). Waiting 22s for server cleanup before reconnecting...` });
+      } else if (lower.includes('slow_login') || lower.includes('official minecraft account') || lower.includes('different username') || lower.includes('registered to an official')) {
+        const currentUsername = (this.botConfig && this.botConfig.username) || (this.currentServer && this.currentServer.username) || this.botName || 'Bot';
+        let fallbackUsername = currentUsername;
+        if (!fallbackUsername.endsWith('_99')) {
+          fallbackUsername = `${fallbackUsername.replace(/_+$/, '')}_99`;
+        } else {
+          fallbackUsername = `${fallbackUsername.slice(0, -3)}_88`;
+        }
+        if (fallbackUsername.length > 16) fallbackUsername = fallbackUsername.substring(0, 16);
+
+        this.emit('log', {
+          type: 'warn',
+          text: `⚠️ [CONNECT] Server requires official Mojang authentication for "${currentUsername}" (${kickReason}). Automatically adapting offline in-game username to "${fallbackUsername}" to bypass premium auth lock...`
+        });
+
+        this.botConfig.username = fallbackUsername;
+        if (this.currentServer) {
+          this.currentServer.username = fallbackUsername;
+          try {
+            this.storage.saveServer(this.currentServer);
+          } catch (e) {}
+        }
+        if (this.storage && typeof this.storage.saveBot === 'function') {
+          try {
+            this.storage.saveBot({
+              ...this.botConfig,
+              id: this.botId,
+              name: this.botName,
+              username: fallbackUsername
+            });
+          } catch (e) {}
+        }
+        this.reconnectAttempts = 0;
+        customDelay = 3;
       } else if (this.state === STATES.AFK) {
         this.emit('log', { type: 'warn', text: `[AFK] Connection lost (kicked: ${kickReason}). Preparing recovery...` });
       } else {

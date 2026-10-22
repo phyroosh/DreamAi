@@ -47,7 +47,7 @@ export class BotPool extends EventEmitter {
     const normalizedConfig = {
       id,
       name: botConfig.name || rawUser,
-      username: rawUser,
+      username: botConfig.username || rawUser,
       loginPassword: botConfig.loginPassword || '209801',
       autoLogin: botConfig.autoLogin !== false,
       host: botConfig.host || 'paid34.skilloraclouds.com',
@@ -216,7 +216,8 @@ export class BotPool extends EventEmitter {
       const bot = botList[i];
       try {
         if (bot.state === STATES.DISCONNECTED || bot.state === STATES.ERROR) {
-          this.connectBot(bot.botId, connectionOptions);
+          const { username: _ignored, ...optionsWithoutUsername } = connectionOptions;
+          this.connectBot(bot.botId, optionsWithoutUsername);
           results.push({ id: bot.botId, success: true });
         } else {
           results.push({ id: bot.botId, success: true, message: 'Already connected or connecting' });

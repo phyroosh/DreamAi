@@ -1,5 +1,6 @@
 import { test, describe, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+import EventEmitter from 'node:events';
 import { BotPool } from '../src/botPool.js';
 import { STATES } from '../src/botManager.js';
 
@@ -53,8 +54,8 @@ describe('BotPool - Multi-Bot Orchestration & Monitoring', () => {
     const summaries = pool.getBotSummaries();
     assert.equal(summaries.length, 2);
 
-    const aaswaam = summaries.find(b => b.username === 'Aaswaam');
-    const monalisa = summaries.find(b => b.username === 'MONALISA__');
+    const aaswaam = summaries.find(b => b.name === 'Aaswaam' || b.username === 'Aaswaam');
+    const monalisa = summaries.find(b => b.name === 'MONALISA__' || b.username === 'MONALISA__');
 
     assert.ok(aaswaam, 'Aaswaam bot should exist in pool summaries');
     assert.ok(monalisa, 'MONALISA__ bot should exist in pool summaries');
@@ -171,5 +172,31 @@ describe('BotPool - Multi-Bot Orchestration & Monitoring', () => {
     pool.disconnectAll();
     assert.equal(botADisconnected, true);
     assert.equal(botBDisconnected, true);
+  });
+
+  test('8. Auto-recovery: slow_login kick automatically adapts offline username to bypass premium lock', () => {
+    const pool = new BotPool(mockStorage);
+    const bot = pool.getBot('bot_monalisa');
+    bot.botConfig.username = 'MONALISA__';
+    bot.currentServer = { host: 'mc.example.com', port: 25565, username: 'MONALISA__' };
+
+    const fakeBot = new EventEmitter();
+    fakeBot.entity = null;
+    fakeBot.inventory = { slots: [] };
+    bot.bot = fakeBot;
+    bot.state = STATES.CONNECTING;
+    bot.setupBotEvents('password123', true);
+
+    // Trigger slow_login kick
+    fakeBot.emit('kicked', 'multiplayer.disconnect.slow_login');
+
+    assert.equal(bot.botConfig.username, 'MONALISA_99');
+    assert.equal(bot.currentServer.username, 'MONALISA_99');
+    assert.equal(bot.botName, 'MONALISA__');
+
+    if (bot.reconnectTimer) {
+      clearTimeout(bot.reconnectTimer);
+      bot.reconnectTimer = null;
+    }
   });
 });
