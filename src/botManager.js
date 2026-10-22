@@ -480,8 +480,8 @@ export class BotManager extends EventEmitter {
       this.reconnectTimer = null;
     }
 
-    let host = (serverConfig.host || '').trim().toLowerCase();
-    let port = Number(serverConfig.port);
+    let host = ((serverConfig.host && String(serverConfig.host).trim()) || (this.botConfig && this.botConfig.host) || '').trim().toLowerCase();
+    let port = Number(serverConfig.port) || (this.botConfig && Number(this.botConfig.port)) || 25565;
 
     // Auto-detect host:port syntax (e.g. paid34.skilloraclouds.com:25585)
     if (host.includes(':')) {

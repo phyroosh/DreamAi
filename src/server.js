@@ -159,8 +159,14 @@ app.get(['/api/bots/:id/inventory', '/api/inventory'], (req, res) => {
 app.post(['/api/bots/:id/connect', '/api/bot/connect'], (req, res) => {
   try {
     const bot = getTargetBot(req);
-    const { host, port, username, version, loginPassword, autoLogin } = req.body;
-    if (!host && !bot.botConfig?.host) {
+    const body = req.body || {};
+    const host = body.host || bot.botConfig?.host;
+    const port = body.port || bot.botConfig?.port;
+    const username = body.username || bot.botConfig?.username;
+    const version = body.version || bot.botConfig?.version;
+    const loginPassword = body.loginPassword !== undefined ? body.loginPassword : bot.botConfig?.loginPassword;
+    const autoLogin = body.autoLogin !== undefined ? body.autoLogin : bot.botConfig?.autoLogin;
+    if (!host) {
       return res.status(400).json({ error: 'Server host is required' });
     }
     bot.connect({ host, port, username, version, loginPassword, autoLogin });
