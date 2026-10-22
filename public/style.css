@@ -1217,3 +1217,133 @@ details.advanced-settings summary { cursor: pointer; user-select: none; padding:
   font-size: 10px;
 }
 
+/* Multi-Bot Orchestration & Switcher Bar */
+.bot-switcher-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 16px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.bot-switcher-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.bot-bar-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+
+.bot-tabs-container {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.bot-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.bot-tab:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-main);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.bot-tab.active {
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+  border-color: #3b82f6;
+  font-weight: 600;
+  box-shadow: 0 0 8px rgba(59, 130, 246, 0.2);
+}
+
+.bot-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.bot-status-dot.online {
+  background: #22c55e;
+  box-shadow: 0 0 6px #22c55e;
+}
+
+.bot-status-dot.offline {
+  background: #71717a;
+}
+
+.bot-status-dot.transitioning {
+  background: #f59e0b;
+  box-shadow: 0 0 6px #f59e0b;
+  animation: pulse-amber 1.2s infinite ease-in-out;
+}
+
+.bot-status-dot.error {
+  background: #ef4444;
+  box-shadow: 0 0 6px #ef4444;
+}
+
+.bot-tab-delete {
+  margin-left: 4px;
+  opacity: 0.5;
+  font-size: 11px;
+  padding: 0 2px;
+  border-radius: 3px;
+  transition: opacity 0.15s;
+}
+
+.bot-tab-delete:hover {
+  opacity: 1;
+  color: #ef4444;
+}
+
+.bot-bar-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.bot-badge-tag {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  margin-right: 6px;
+  font-family: var(--font-mono);
+  background: rgba(59, 130, 246, 0.2);
+  color: #93c5fd;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.bot-badge-tag.monalisa {
+  background: rgba(236, 72, 153, 0.2);
+  color: #f472b6;
+  border-color: rgba(236, 72, 153, 0.3);
+}
+
+

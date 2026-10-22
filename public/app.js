@@ -137,10 +137,129 @@ let currentFilter = 'all';
 let uptimeSec = 0;
 let uptimeInterval = null;
 
+// Multi-bot pool state & DOM elements
+let activeBots = [];
+let activeBotId = null;
+
+const botTabsContainer = document.getElementById('bot-tabs-container');
+const btnAddBotModal = document.getElementById('btn-add-bot-modal');
+const btnConnectAll = document.getElementById('btn-connect-all');
+const btnDisconnectAll = document.getElementById('btn-disconnect-all');
+
+const modalAddBot = document.getElementById('modal-add-bot');
+const btnCloseAddBot = document.getElementById('btn-close-add-bot');
+const btnCancelAddBot = document.getElementById('btn-cancel-add-bot');
+const formAddBot = document.getElementById('form-add-bot');
+const inpAddUsername = document.getElementById('inp-add-username');
+const inpAddHost = document.getElementById('inp-add-host');
+const inpAddPort = document.getElementById('inp-add-port');
+const inpAddPassword = document.getElementById('inp-add-password');
+const inpAddVersion = document.getElementById('inp-add-version');
+
+function getBotDotClass(state, isReconnecting) {
+  if (isReconnecting || ['INITIALIZING', 'CONNECTING', 'RECONNECTING'].includes(state)) {
+    return 'transitioning';
+  }
+  if (['JOINED', 'WAITING_FOR_TPA', 'ACCEPTING_TPA', 'VERIFYING_TELEPORT', 'AFK', 'SPAWNED'].includes(state)) {
+    return 'online';
+  }
+  if (state === 'ERROR') {
+    return 'error';
+  }
+  return 'offline';
+}
+
+function renderBotTabs() {
+  if (!botTabsContainer) return;
+  botTabsContainer.innerHTML = '';
+
+  if (!activeBots || activeBots.length === 0) {
+    botTabsContainer.innerHTML = '<span style="font-size:11px; color:var(--text-muted);">No bots configured</span>';
+    return;
+  }
+
+  activeBots.forEach((bot) => {
+    const isCur = bot.id === activeBotId;
+    const tab = document.createElement('div');
+    tab.className = `bot-tab ${isCur ? 'active' : ''}`;
+    tab.dataset.botId = bot.id;
+
+    const dotClass = getBotDotClass(bot.state, bot.isReconnecting);
+
+    tab.innerHTML = `
+      <span class="bot-status-dot ${dotClass}" title="${bot.state}"></span>
+      <span class="bot-tab-name">${bot.name || bot.username}</span>
+      ${activeBots.length > 1 ? `<span class="bot-tab-delete" title="Remove bot from pool">✕</span>` : ''}
+    `;
+
+    // Click tab to focus bot
+    tab.onclick = (e) => {
+      if (e.target.classList.contains('bot-tab-delete')) return;
+      selectActiveBot(bot.id);
+    };
+
+    // Delete bot
+    const delBtn = tab.querySelector('.bot-tab-delete');
+    if (delBtn) {
+      delBtn.onclick = (e) => {
+        e.stopPropagation();
+        if (confirm(`Remove bot "${bot.name || bot.username}" from the pool?`)) {
+          fetch(`/api/bots/${bot.id}`, { method: 'DELETE' })
+            .then(res => res.json())
+            .then(data => {
+              if (data.bots) {
+                activeBots = data.bots;
+                if (activeBotId === bot.id) {
+                  activeBotId = activeBots[0]?.id || null;
+                }
+                renderBotTabs();
+              }
+            })
+            .catch(err => console.error('Failed to remove bot:', err));
+        }
+      };
+    }
+
+    botTabsContainer.appendChild(tab);
+  });
+}
+
+function selectActiveBot(botId) {
+  if (!botId) return;
+  activeBotId = botId;
+  socket.emit('bots:set_active', botId);
+  renderBotTabs();
+
+  // Populate quick connect form with selected bot info
+  const targetBot = activeBots.find(b => b.id === botId);
+  if (targetBot) {
+    if (inpUser) inpUser.value = targetBot.username || targetBot.name || 'Aaswaam';
+    if (targetBot.server) {
+      if (inpHost && targetBot.server.host) inpHost.value = targetBot.server.host;
+      if (inpPort && targetBot.server.port) inpPort.value = targetBot.server.port;
+    }
+  }
+
+  // Fetch status and inventory for the newly selected bot
+  fetch(`/api/bots/${botId}/status`)
+    .then(r => r.json())
+    .then(st => {
+      if (st && st.state) updateStatusUI(st);
+    })
+    .catch(() => {});
+
+  fetch(`/api/bots/${botId}/inventory`)
+    .then(r => r.json())
+    .then(inv => {
+      if (inv) updateInventoryUI(inv);
+    })
+    .catch(() => {});
+}
+
 // Helpers
 const fmtTime = (s) => `${Math.floor(s/60).toString().padStart(2,'0')}:${Math.floor(s%60).toString().padStart(2,'0')}`;
 
-const appendLog = (senderTag, text, type, category = 'system', customTime = null) => {
+const appendLog = (senderTag, text, type, category = 'system', customTime = null, botName = null) => {
   const row = document.createElement('div');
   row.className = `log-row`;
   row.dataset.type = category;
@@ -156,8 +275,11 @@ const appendLog = (senderTag, text, type, category = 'system', customTime = null
   if (type === 'action') tagClass = 't-act';
   if (type === 'error' || type === 'warn') tagClass = 't-err';
 
+  const botBadge = botName ? `<span class="bot-badge-tag ${botName.toLowerCase().includes('monalisa') ? 'monalisa' : ''}">[${botName}]</span>` : '';
+
   row.innerHTML = `
     <span class="log-time">[${time}]</span>
+    ${botBadge}
     <span class="log-tag ${tagClass}">${senderTag}</span>
     <span class="log-msg">${text}</span>
   `;
@@ -362,10 +484,10 @@ function renderHotbarStrip() {
   }
   hotbarStrip.innerHTML = html;
 
-  hotbarStrip.querySelectorAll('.hotbar-slot-box').forEach(el => {
+    hotbarStrip.querySelectorAll('.hotbar-slot-box').forEach(el => {
     el.onclick = () => {
       const idx = parseInt(el.dataset.hotbarIndex, 10);
-      socket.emit('bot:set_hotbar', idx);
+      socket.emit('bot:set_hotbar', { botId: activeBotId, slot: idx });
     };
   });
 
@@ -421,6 +543,7 @@ function onSlotClicked(slotNum) {
     const dst = s;
     selectedSlot = null;
     socket.emit('bot:inventory_action', {
+      botId: activeBotId,
       action: 'swap',
       sourceSlot: src,
       destSlot: dst
@@ -539,34 +662,34 @@ function updateControlDeckUI() {
 
 // Hand Action Listeners
 if (btnLeftClick) {
-  btnLeftClick.onclick = () => socket.emit('bot:hand_action', { action: 'left_click' });
+  btnLeftClick.onclick = () => socket.emit('bot:hand_action', { botId: activeBotId, action: 'left_click' });
 }
 if (btnHoldLeft) {
   btnHoldLeft.onclick = () => {
     if (isHoldingLeftClick) {
-      socket.emit('bot:hand_action', { action: 'stop_left_click_hold' });
+      socket.emit('bot:hand_action', { botId: activeBotId, action: 'stop_left_click_hold' });
     } else {
-      socket.emit('bot:hand_action', { action: 'start_left_click_hold' });
+      socket.emit('bot:hand_action', { botId: activeBotId, action: 'start_left_click_hold' });
     }
   };
 }
 if (btnRightClick) {
-  btnRightClick.onclick = () => socket.emit('bot:hand_action', { action: 'right_click' });
+  btnRightClick.onclick = () => socket.emit('bot:hand_action', { botId: activeBotId, action: 'right_click' });
 }
 if (btnHoldRight) {
   btnHoldRight.onclick = () => {
     if (isHoldingRightClick) {
-      socket.emit('bot:hand_action', { action: 'stop_right_click_hold' });
+      socket.emit('bot:hand_action', { botId: activeBotId, action: 'stop_right_click_hold' });
     } else {
-      socket.emit('bot:hand_action', { action: 'start_right_click_hold' });
+      socket.emit('bot:hand_action', { botId: activeBotId, action: 'start_right_click_hold' });
     }
   };
 }
 if (btnEatFood) {
-  btnEatFood.onclick = () => socket.emit('bot:hand_action', { action: 'consume' });
+  btnEatFood.onclick = () => socket.emit('bot:hand_action', { botId: activeBotId, action: 'consume' });
 }
 if (btnDropHeld) {
-  btnDropHeld.onclick = () => socket.emit('bot:hand_action', { action: 'drop_held', all: true });
+  btnDropHeld.onclick = () => socket.emit('bot:hand_action', { botId: activeBotId, action: 'drop_held', all: true });
 }
 if (btnOpenInventory) {
   btnOpenInventory.onclick = () => {
@@ -588,29 +711,29 @@ if (btnCloseInventory) {
 if (btnSlotEquip) {
   btnSlotEquip.onclick = () => {
     if (selectedSlot !== null) {
-      socket.emit('bot:inventory_action', { action: 'equip', slot: selectedSlot, destination: 'hand' });
+      socket.emit('bot:inventory_action', { botId: activeBotId, action: 'equip', slot: selectedSlot, destination: 'hand' });
     }
   };
 }
 if (btnSlotConsume) {
   btnSlotConsume.onclick = () => {
     if (selectedSlot !== null) {
-      socket.emit('bot:inventory_action', { action: 'equip', slot: selectedSlot, destination: 'hand' });
-      setTimeout(() => socket.emit('bot:hand_action', { action: 'consume' }), 200);
+      socket.emit('bot:inventory_action', { botId: activeBotId, action: 'equip', slot: selectedSlot, destination: 'hand' });
+      setTimeout(() => socket.emit('bot:hand_action', { botId: activeBotId, action: 'consume' }), 200);
     }
   };
 }
 if (btnSlotDrop1) {
   btnSlotDrop1.onclick = () => {
     if (selectedSlot !== null) {
-      socket.emit('bot:inventory_action', { action: 'drop', slot: selectedSlot, count: 1 });
+      socket.emit('bot:inventory_action', { botId: activeBotId, action: 'drop', slot: selectedSlot, count: 1 });
     }
   };
 }
 if (btnSlotDropAll) {
   btnSlotDropAll.onclick = () => {
     if (selectedSlot !== null) {
-      socket.emit('bot:inventory_action', { action: 'drop', slot: selectedSlot });
+      socket.emit('bot:inventory_action', { botId: activeBotId, action: 'drop', slot: selectedSlot });
     }
   };
 }
@@ -631,7 +754,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key >= '1' && e.key <= '9') {
     e.preventDefault();
     const idx = parseInt(e.key, 10) - 1;
-    socket.emit('bot:set_hotbar', idx);
+    socket.emit('bot:set_hotbar', { botId: activeBotId, slot: idx });
     return;
   }
 
@@ -650,7 +773,7 @@ document.addEventListener('keydown', (e) => {
   // Q for Drop Held item
   if (e.key === 'q' || e.key === 'Q') {
     e.preventDefault();
-    socket.emit('bot:hand_action', { action: 'drop_held', all: !e.shiftKey });
+    socket.emit('bot:hand_action', { botId: activeBotId, action: 'drop_held', all: !e.shiftKey });
     return;
   }
 
@@ -664,8 +787,8 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-// bot:inventory socket event
-socket.on('bot:inventory', (inv) => {
+// Multi-Bot & Single Bot UI Renderers
+function updateInventoryUI(inv) {
   if (!inv) return;
   currentInventory = inv;
   renderHotbarStrip();
@@ -673,18 +796,13 @@ socket.on('bot:inventory', (inv) => {
     renderFullInventoryModal();
   }
   updateControlDeckUI();
-});
+}
 
-document.querySelectorAll('[data-action]').forEach(btn => {
-  btn.onclick = () => socket.emit('bot:action', btn.dataset.action);
-});
-
-const btnConnect = document.getElementById('btn-connect');
-const btnLeave = document.getElementById('btn-leave');
-
-// Socket Events
-socket.on('bot:status', (st) => {
-  elStatus.textContent = st.state;
+function updateStatusUI(st) {
+  if (!st) return;
+  const targetBot = activeBots.find(b => b.id === (st.botId || activeBotId));
+  const botLabel = st.username || targetBot?.name || 'Bot';
+  elStatus.textContent = `${botLabel}: ${st.state}`;
   elStatus.className = `status-pill ${st.state.toLowerCase()}`;
   
   const isDisconnected = st.state === 'DISCONNECTED' && !st.isReconnecting;
@@ -729,7 +847,7 @@ socket.on('bot:status', (st) => {
   if (st.dimension) infoDim.textContent = st.dimension;
   if (st.difficulty) infoDiff.textContent = st.difficulty;
 
-  // Inventory
+  // Inventory preview
   if (st.inventory) {
     const { items, armor, heldItem, offhand } = st.inventory;
     
@@ -739,10 +857,10 @@ socket.on('bot:status', (st) => {
       return `<div class="armor-slot" data-filled="true" title="${data.displayName}">✓</div>`;
     };
     invArmor.innerHTML = `
-      ${renderArmor('Helmet', armor.helmet)}
-      ${renderArmor('Chest', armor.chestplate)}
-      ${renderArmor('Legs', armor.leggings)}
-      ${renderArmor('Boots', armor.boots)}
+      ${renderArmor('Helmet', armor?.helmet)}
+      ${renderArmor('Chest', armor?.chestplate)}
+      ${renderArmor('Legs', armor?.leggings)}
+      ${renderArmor('Boots', armor?.boots)}
     `;
 
     // Render Items
@@ -759,7 +877,7 @@ socket.on('bot:status', (st) => {
     renderItem('Held', heldItem);
     renderItem('Offhand', offhand);
 
-    items.forEach(i => {
+    (items || []).forEach(i => {
       itemsHtml += `<div class="inv-item">
         <div class="inv-item-name"><span class="inv-icon">📦</span><span>${i.displayName}</span></div>
         <span class="inv-count">x${i.count}</span>
@@ -769,11 +887,7 @@ socket.on('bot:status', (st) => {
     if (!itemsHtml) itemsHtml = '<div class="empty-text">Inventory Empty</div>';
     invItems.innerHTML = itemsHtml;
 
-    currentInventory = st.inventory;
-    renderHotbarStrip();
-    if (modalInventory && modalInventory.open) {
-      renderFullInventoryModal();
-    }
+    updateInventoryUI(st.inventory);
   }
 
   // Players
@@ -790,7 +904,7 @@ socket.on('bot:status', (st) => {
     listPlayers.innerHTML = phtml;
   }
   
-  if (st.state === 'SPAWNED') {
+  if (['SPAWNED', 'JOINED', 'AFK'].includes(st.state)) {
     if (!uptimeInterval) {
       uptimeSec = st.uptime || 0;
       valUptime.textContent = fmtTime(uptimeSec);
@@ -803,6 +917,53 @@ socket.on('bot:status', (st) => {
     clearInterval(uptimeInterval);
     uptimeInterval = null;
     valUptime.textContent = '00:00';
+  }
+}
+
+// Multi-Bot Socket Listeners
+socket.on('bots:updated', (bots) => {
+  activeBots = bots || [];
+  if (!activeBotId && activeBots.length > 0) {
+    const act = activeBots.find(b => b.isActive) || activeBots[0];
+    activeBotId = act?.id;
+  }
+  renderBotTabs();
+});
+
+socket.on('bots:activeChanged', ({ activeBotId: newId }) => {
+  activeBotId = newId;
+  renderBotTabs();
+});
+
+socket.on('bot:inventory', (inv) => {
+  if (!inv) return;
+  if (!inv.botId || inv.botId === activeBotId) {
+    updateInventoryUI(inv);
+  }
+});
+
+document.querySelectorAll('[data-action]').forEach(btn => {
+  btn.onclick = () => socket.emit('bot:action', { botId: activeBotId, action: btn.dataset.action });
+});
+
+const btnConnect = document.getElementById('btn-connect');
+const btnLeave = document.getElementById('btn-leave');
+
+socket.on('bot:status', (st) => {
+  if (!st) return;
+  if (st.botId) {
+    const b = activeBots.find(x => x.id === st.botId);
+    if (b) {
+      b.state = st.state;
+      b.health = st.health;
+      b.food = st.food;
+      b.uptime = st.uptime;
+      b.isReconnecting = st.isReconnecting;
+      renderBotTabs();
+    }
+  }
+  if (!st.botId || st.botId === activeBotId) {
+    updateStatusUI(st);
   }
 });
 
@@ -824,11 +985,13 @@ socket.on('bot:chat', (msg) => {
   } else if (senderName === 'SERVER' || senderName === 'ACTIONBAR' || senderName === 'CHAT') {
     type = 'chat';
   }
-  appendLog(senderName, msg.text, type, 'chat', msg.time);
+  const botName = msg.botName || (activeBots.find(b => b.id === msg.botId)?.name);
+  appendLog(senderName, msg.text, type, 'chat', msg.time, botName);
 });
 
 socket.on('bot:log', (log) => {
-  appendLog(log.type.toUpperCase(), log.text, log.type, log.type === 'action' ? 'system' : log.type);
+  const botName = log.botName || (activeBots.find(b => b.id === log.botId)?.name);
+  appendLog(log.type.toUpperCase(), log.text, log.type, log.type === 'action' ? 'system' : log.type, null, botName);
 });
 
 socket.on('servers:updated', (srvs) => {
@@ -922,6 +1085,7 @@ formConnect.onsubmit = (e) => {
   }
 
   socket.emit('bot:connect', {
+    botId: activeBotId,
     host,
     port,
     username: inpUser.value.trim(),
@@ -957,14 +1121,107 @@ btnBookmark.onclick = async () => {
   });
 };
 
-btnDisconnect.onclick = () => socket.emit('bot:disconnect');
-if (btnLeave) btnLeave.onclick = () => socket.emit('bot:disconnect');
+btnDisconnect.onclick = () => socket.emit('bot:disconnect', { botId: activeBotId });
+if (btnLeave) btnLeave.onclick = () => socket.emit('bot:disconnect', { botId: activeBotId });
+
+// Connect All & Disconnect All Batch Handlers
+if (btnConnectAll) {
+  btnConnectAll.onclick = async () => {
+    btnConnectAll.disabled = true;
+    btnConnectAll.textContent = '⏳ Connecting...';
+    try {
+      await fetch('/api/bots/connect-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+    } catch (e) {
+      console.error('Failed to connect all:', e);
+    } finally {
+      setTimeout(() => {
+        btnConnectAll.disabled = false;
+        btnConnectAll.textContent = '⚡ Connect All';
+      }, 1500);
+    }
+  };
+}
+
+if (btnDisconnectAll) {
+  btnDisconnectAll.onclick = async () => {
+    btnDisconnectAll.disabled = true;
+    btnDisconnectAll.textContent = '⏳ Disconnecting...';
+    try {
+      await fetch('/api/bots/disconnect-all', { method: 'POST' });
+    } catch (e) {
+      console.error('Failed to disconnect all:', e);
+    } finally {
+      setTimeout(() => {
+        btnDisconnectAll.disabled = false;
+        btnDisconnectAll.textContent = '⏹️ Disconnect All';
+      }, 1000);
+    }
+  };
+}
+
+// Add Bot to Pool Modal
+if (btnAddBotModal && modalAddBot) {
+  btnAddBotModal.onclick = () => {
+    modalAddBot.showModal();
+    if (inpAddUsername) inpAddUsername.focus();
+  };
+}
+if (btnCloseAddBot && modalAddBot) {
+  btnCloseAddBot.onclick = () => modalAddBot.close();
+}
+if (btnCancelAddBot && modalAddBot) {
+  btnCancelAddBot.onclick = () => modalAddBot.close();
+}
+if (formAddBot) {
+  formAddBot.onsubmit = async (e) => {
+    e.preventDefault();
+    const username = (inpAddUsername?.value || '').trim();
+    if (!username) return;
+    const host = (inpAddHost?.value || 'paid34.skilloraclouds.com').trim();
+    const port = parseInt(inpAddPort?.value || '25593', 10);
+    const password = (inpAddPassword?.value || '209801').trim();
+    const version = (inpAddVersion?.value || '1.21.4').trim();
+
+    try {
+      const res = await fetch('/api/bots', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: username,
+          username,
+          host,
+          port,
+          loginPassword: password,
+          version
+        })
+      });
+      const data = await res.json();
+      if (data.success && data.bots) {
+        activeBots = data.bots;
+        if (data.bot?.id) {
+          activeBotId = data.bot.id;
+        }
+        renderBotTabs();
+        modalAddBot.close();
+        formAddBot.reset();
+      } else if (data.error) {
+        alert(`Error adding bot: ${data.error}`);
+      }
+    } catch (err) {
+      alert(`Failed to add bot: ${err.message}`);
+    }
+  };
+}
 
 formChat.onsubmit = (e) => {
   e.preventDefault();
   const msg = inpChat.value.trim();
   if(!msg) return;
-  socket.emit('bot:chat', msg);
+  socket.emit('bot:chat', { botId: activeBotId, message: msg });
   inpChat.value = '';
 };
 
@@ -1080,14 +1337,14 @@ if (btnStartCrawl) {
     shopProgressBar.style.width = '5%';
     shopProgressCount.textContent = '0 items found';
 
-    socket.emit('shop:crawl', { command: cmd, delay });
+    socket.emit('shop:crawl', { botId: activeBotId, command: cmd, delay });
   };
 }
 
 // Stop Crawl
 if (btnStopCrawl) {
   btnStopCrawl.onclick = () => {
-    socket.emit('shop:stop');
+    socket.emit('shop:stop', { botId: activeBotId });
     btnStopCrawl.textContent = 'Stopping...';
   };
 }

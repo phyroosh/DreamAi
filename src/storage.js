@@ -7,6 +7,7 @@ const __dirname = path.dirname(__filename);
 const DATA_DIR = path.join(__dirname, '..', 'data');
 const SERVERS_FILE = path.join(DATA_DIR, 'servers.json');
 const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
+const BOTS_FILE = path.join(DATA_DIR, 'bots.json');
 
 // Ensure data directory exists
 if (!fs.existsSync(DATA_DIR)) {
@@ -210,6 +211,107 @@ export function getShopCatalog(serverHost = null) {
   } catch (err) {
     console.error('Error loading shop catalog:', err);
     return null;
+  }
+}
+
+// Multi-Bot Management Storage
+export const DEFAULT_BOTS = [
+  {
+    id: 'bot_aaswaam',
+    name: 'Aaswaam',
+    username: 'Aaswaam',
+    loginPassword: process.env.DEFAULT_PASSWORD || '209801',
+    autoLogin: true,
+    host: 'paid34.skilloraclouds.com',
+    port: 25593,
+    version: '1.21.4',
+    autoReconnect: true,
+    antiAfkEnabled: true,
+    antiAfkMode: 'still'
+  },
+  {
+    id: 'bot_monalisa',
+    name: 'MONALISA__',
+    username: 'MONALISA__',
+    loginPassword: process.env.DEFAULT_PASSWORD || '209801',
+    autoLogin: true,
+    host: 'paid34.skilloraclouds.com',
+    port: 25593,
+    version: '1.21.4',
+    autoReconnect: true,
+    antiAfkEnabled: true,
+    antiAfkMode: 'still'
+  }
+];
+
+export function getBots() {
+  try {
+    if (!fs.existsSync(BOTS_FILE)) {
+      fs.writeFileSync(BOTS_FILE, JSON.stringify(DEFAULT_BOTS, null, 2));
+      return [...DEFAULT_BOTS];
+    }
+    const data = fs.readFileSync(BOTS_FILE, 'utf8').trim();
+    if (!data) {
+      fs.writeFileSync(BOTS_FILE, JSON.stringify(DEFAULT_BOTS, null, 2));
+      return [...DEFAULT_BOTS];
+    }
+    const list = JSON.parse(data);
+    return Array.isArray(list) && list.length > 0 ? list : [...DEFAULT_BOTS];
+  } catch (err) {
+    console.error('Error reading bots:', err);
+    return [...DEFAULT_BOTS];
+  }
+}
+
+export function getBot(id) {
+  const bots = getBots();
+  return bots.find(b => b.id === id || b.username.toLowerCase() === String(id).toLowerCase()) || null;
+}
+
+export function saveBot(botData) {
+  try {
+    const bots = getBots();
+    const id = botData.id || `bot_${String(botData.username || Date.now()).toLowerCase().replace(/[^a-z0-9_]/g, '_')}`;
+    const existingIndex = bots.findIndex(b => b.id === id || b.username.toLowerCase() === String(botData.username || '').toLowerCase());
+
+    const entry = {
+      id,
+      name: botData.name || botData.username || 'Bot',
+      username: botData.username || 'Bot',
+      loginPassword: botData.loginPassword || '209801',
+      autoLogin: botData.autoLogin !== false,
+      host: botData.host || 'paid34.skilloraclouds.com',
+      port: Number(botData.port) || 25593,
+      version: botData.version || '1.21.4',
+      autoReconnect: botData.autoReconnect !== false,
+      antiAfkEnabled: botData.antiAfkEnabled !== false,
+      antiAfkMode: botData.antiAfkMode || 'still',
+      updatedAt: new Date().toISOString()
+    };
+
+    if (existingIndex >= 0) {
+      bots[existingIndex] = { ...bots[existingIndex], ...entry };
+    } else {
+      bots.push(entry);
+    }
+
+    fs.writeFileSync(BOTS_FILE, JSON.stringify(bots, null, 2));
+    return entry;
+  } catch (err) {
+    console.error('Error saving bot:', err);
+    throw err;
+  }
+}
+
+export function deleteBot(id) {
+  try {
+    const bots = getBots();
+    const filtered = bots.filter(b => b.id !== id && b.username.toLowerCase() !== String(id).toLowerCase());
+    fs.writeFileSync(BOTS_FILE, JSON.stringify(filtered, null, 2));
+    return filtered;
+  } catch (err) {
+    console.error('Error deleting bot:', err);
+    throw err;
   }
 }
 

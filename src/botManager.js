@@ -33,9 +33,12 @@ export const VALID_TRANSITIONS = {
 };
 
 export class BotManager extends EventEmitter {
-  constructor(storage) {
+  constructor(storage, options = {}) {
     super();
     this.storage = storage;
+    this.botId = options.id || options.botId || 'bot_default';
+    this.botName = options.name || options.username || 'Bot';
+    this.botConfig = { ...options };
     this.bot = null;
     this.state = STATES.DISCONNECTED;
     this.currentServer = null;
@@ -91,7 +94,7 @@ export class BotManager extends EventEmitter {
     this.systemLogs = [];
     this.on('log', (entry) => {
       const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      this.systemLogs.push({ time, ...entry });
+      this.systemLogs.push({ time, botId: this.botId, botName: this.botName, ...entry });
       if (this.systemLogs.length > 100) this.systemLogs.shift();
     });
   }
@@ -133,6 +136,8 @@ export class BotManager extends EventEmitter {
     setTimeout(() => this.recentEmittedChats.delete(key), 3000);
 
     this.emit('chat', {
+      botId: this.botId,
+      botName: this.botName,
       sender: cleanSender,
       text: cleanText,
       time: new Date().toLocaleTimeString(),
@@ -337,9 +342,11 @@ export class BotManager extends EventEmitter {
     }
 
     return {
+      botId: this.botId,
+      botName: this.botName,
       state: this.state,
       server: this.currentServer,
-      username: this.bot?.username || this.currentServer?.username || this.settings.defaultUsername,
+      username: this.bot?.username || this.currentServer?.username || this.botConfig.username || this.settings.defaultUsername,
       trustedPlayer: this.trustedPlayer,
       farmLocation: this.farmLocation,
       reconnectAttempts: this.reconnectAttempts,
@@ -369,6 +376,8 @@ export class BotManager extends EventEmitter {
   getInventory() {
     if (!this.bot || !this.bot.inventory) {
       return {
+        botId: this.botId,
+        botName: this.botName,
         items: [],
         armor: { helmet: null, chestplate: null, leggings: null, boots: null },
         heldItem: null,
@@ -431,6 +440,8 @@ export class BotManager extends EventEmitter {
     const offhand = formatItem(off, 45);
 
     return {
+      botId: this.botId,
+      botName: this.botName,
       items,
       armor,
       heldItem,
@@ -483,13 +494,13 @@ export class BotManager extends EventEmitter {
     }
 
     if (!port || isNaN(port) || port <= 0) {
-      port = 25565;
+      port = (this.botConfig && this.botConfig.port) || 25565;
     }
 
-    const username = (serverConfig.username && serverConfig.username.trim()) || this.settings.defaultUsername || 'Aaswaam';
-    const loginPassword = serverConfig.loginPassword !== undefined ? serverConfig.loginPassword : this.settings.defaultPassword;
-    const autoLogin = serverConfig.autoLogin !== undefined ? serverConfig.autoLogin : this.settings.autoLogin;
-    let version = serverConfig.version ? serverConfig.version.trim() : '1.21.4';
+    const username = (serverConfig.username && serverConfig.username.trim()) || (this.botConfig && this.botConfig.username) || this.settings.defaultUsername || 'Aaswaam';
+    const loginPassword = serverConfig.loginPassword !== undefined ? serverConfig.loginPassword : ((this.botConfig && this.botConfig.loginPassword) || this.settings.defaultPassword);
+    const autoLogin = serverConfig.autoLogin !== undefined ? serverConfig.autoLogin : (this.botConfig && this.botConfig.autoLogin !== undefined ? this.botConfig.autoLogin : this.settings.autoLogin);
+    let version = serverConfig.version ? serverConfig.version.trim() : ((this.botConfig && this.botConfig.version) || '1.21.4');
     if (!version || version.toLowerCase() === 'auto') {
       version = '1.21.4';
     }

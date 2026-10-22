@@ -9,6 +9,7 @@ import dns from 'dns';
 import mc from 'minecraft-protocol';
 import * as storage from './storage.js';
 import { BotManager } from './botManager.js';
+import { BotPool } from './botPool.js';
 import { analyzeEconomy, generateAiPrompt, generateMarkdownReport } from './economyAnalyzer.js';
 
 dotenv.config();
@@ -27,66 +28,356 @@ const PORT = parseInt(process.env.SERVER_PORT || process.env.PORT || process.env
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
-// Initialize Bot Manager
-const botManager = new BotManager(storage);
+// Initialize Multi-Bot Pool
+const botPool = new BotPool(storage);
+
+// Helper to resolve target bot from route params, query, body, headers, or active fallback
+function getTargetBot(req) {
+  const id = req.params?.id || req.query?.botId || req.body?.botId || req.headers?.['x-bot-id'];
+  const bot = botPool.getBot(id);
+  if (!bot) {
+    throw new Error(`Bot "${id || 'active'}" not found`);
+  }
+  return bot;
+}
 
 // Process-level guards against unexpected library-level network drops
 process.on('uncaughtException', (err) => {
   const msg = err?.message || String(err);
   if (msg.includes("Unsupported protocol version '-1'") || msg.includes("version '-1'")) {
     console.warn('[Server Guard] Server returned offline protocol version -1 (offline or sleeping).');
-    botManager.emit('log', { 
+    botPool.emit('bot:log', { 
       type: 'warn', 
       text: '⚠️ Target server returned offline protocol version -1 (server is currently offline or sleeping). Preparing recovery...' 
     });
-    botManager.cleanup();
-    botManager.scheduleReconnect();
     return;
   }
   console.warn('[Server Guard] Caught exception:', msg);
-  botManager.emit('log', { type: 'error', text: `Connection/Network error: ${msg}. Initiating automatic recovery...` });
-  botManager.cleanup();
-  botManager.scheduleReconnect();
+  botPool.emit('bot:log', { type: 'error', text: `Connection/Network error: ${msg}. Initiating automatic recovery...` });
 });
 
 process.on('unhandledRejection', (reason) => {
   const msg = reason?.message || String(reason);
   if (msg.includes("Unsupported protocol version '-1'") || msg.includes("version '-1'")) {
     console.warn('[Server Guard] Server returned offline protocol version -1 (offline or sleeping).');
-    botManager.emit('log', { 
+    botPool.emit('bot:log', { 
       type: 'warn', 
       text: '⚠️ Target server returned offline protocol version -1 (server is currently offline or sleeping). Preparing recovery...' 
     });
-    botManager.cleanup();
-    botManager.scheduleReconnect();
     return;
   }
   console.warn('[Server Guard] Unhandled rejection:', msg);
-  botManager.emit('log', { type: 'error', text: `Connection rejection: ${msg}. Initiating automatic recovery...` });
-  botManager.cleanup();
-  botManager.scheduleReconnect();
+  botPool.emit('bot:log', { type: 'error', text: `Connection rejection: ${msg}. Initiating automatic recovery...` });
 });
 
-// Wire Bot Events to WebSockets
-botManager.on('status', (status) => io.emit('bot:status', status));
-botManager.on('chat', (msg) => io.emit('bot:chat', msg));
-botManager.on('log', (log) => io.emit('bot:log', log));
-botManager.on('settings', (settings) => io.emit('bot:settings', settings));
-botManager.on('inventory', (inv) => io.emit('bot:inventory', inv));
-botManager.on('shop:progress', (data) => io.emit('shop:progress', data));
-botManager.on('shop:complete', (catalog) => io.emit('shop:complete', catalog));
-botManager.on('shop:stopped', () => io.emit('shop:stopped'));
-botManager.on('shop:error', (data) => io.emit('shop:error', data));
+// Wire Multi-Bot Events to WebSockets
+botPool.on('bot:status', (status) => io.emit('bot:status', status));
+botPool.on('bot:chat', (msg) => io.emit('bot:chat', msg));
+botPool.on('bot:log', (log) => io.emit('bot:log', log));
+botPool.on('bot:settings', (settings) => io.emit('bot:settings', settings));
+botPool.on('bot:inventory', (inv) => io.emit('bot:inventory', inv));
+botPool.on('bot:stateChange', (sc) => io.emit('bot:stateChange', sc));
+botPool.on('bots:updated', (bots) => io.emit('bots:updated', bots));
+botPool.on('bots:activeChanged', (d) => io.emit('bots:activeChanged', d));
+botPool.on('shop:progress', (data) => io.emit('shop:progress', data));
+botPool.on('shop:complete', (catalog) => io.emit('shop:complete', catalog));
+botPool.on('shop:stopped', (data) => io.emit('shop:stopped', data));
+botPool.on('shop:error', (data) => io.emit('shop:error', data));
 
-// API Routes
-app.get('/api/status', (req, res) => {
-  res.json(botManager.getStatus());
+// Multi-Bot Management API
+app.get('/api/bots', (req, res) => {
+  res.json(botPool.getBotSummaries());
 });
 
-app.get('/api/logs', (req, res) => {
-  res.json(botManager.getLogs());
+app.post('/api/bots', (req, res) => {
+  try {
+    const bot = botPool.addBot(req.body);
+    res.json({ success: true, bot: bot.getStatus(), bots: botPool.getBotSummaries() });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
+app.delete('/api/bots/:id', (req, res) => {
+  try {
+    const ok = botPool.removeBot(req.params.id);
+    if (!ok) return res.status(404).json({ error: 'Bot not found' });
+    res.json({ success: true, bots: botPool.getBotSummaries() });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/bots/:id/active', (req, res) => {
+  const ok = botPool.setActiveBot(req.params.id);
+  if (!ok) return res.status(404).json({ error: 'Bot not found' });
+  res.json({ success: true, activeBotId: botPool.activeBotId });
+});
+
+app.post('/api/bots/connect-all', async (req, res) => {
+  try {
+    const results = await botPool.connectAll(req.body);
+    res.json({ success: true, results });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/bots/disconnect-all', (req, res) => {
+  botPool.disconnectAll();
+  res.json({ success: true, message: 'All bots disconnected' });
+});
+
+// Bot-Specific & Backward-Compatible API Routes
+app.get(['/api/bots/:id/status', '/api/status'], (req, res) => {
+  try {
+    const bot = getTargetBot(req);
+    res.json(bot.getStatus());
+  } catch (err) {
+    res.status(404).json({ error: err.message });
+  }
+});
+
+app.get(['/api/bots/:id/logs', '/api/logs'], (req, res) => {
+  try {
+    const bot = getTargetBot(req);
+    res.json(bot.getLogs());
+  } catch (err) {
+    res.status(404).json({ error: err.message });
+  }
+});
+
+app.get(['/api/bots/:id/inventory', '/api/inventory'], (req, res) => {
+  try {
+    const bot = getTargetBot(req);
+    res.json(bot.getInventory());
+  } catch (err) {
+    res.status(404).json({ error: err.message });
+  }
+});
+
+app.post(['/api/bots/:id/connect', '/api/bot/connect'], (req, res) => {
+  try {
+    const bot = getTargetBot(req);
+    const { host, port, username, version, loginPassword, autoLogin } = req.body;
+    if (!host && !bot.botConfig?.host) {
+      return res.status(400).json({ error: 'Server host is required' });
+    }
+    bot.connect({ host, port, username, version, loginPassword, autoLogin });
+    res.json({ success: true, message: `Connection initiated for ${bot.botName}` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post(['/api/bots/:id/disconnect', '/api/bot/disconnect'], (req, res) => {
+  try {
+    const bot = getTargetBot(req);
+    bot.disconnect();
+    res.json({ success: true, message: `Disconnected ${bot.botName}` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post(['/api/bots/:id/action', '/api/bot/action'], (req, res) => {
+  try {
+    const bot = getTargetBot(req);
+    const { action } = req.body;
+    bot.manualAction(action);
+    res.json({ success: true, action });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post(['/api/bots/:id/hand-action', '/api/bot/hand-action'], async (req, res) => {
+  try {
+    const bot = getTargetBot(req);
+    const { action, slot, offHand, intervalMs, all } = req.body;
+    let result = { success: true };
+    switch (action) {
+      case 'set_hotbar':
+      case 'set_slot':
+        result = bot.setQuickBarSlot(slot);
+        break;
+      case 'right_click':
+        result = bot.rightClick(offHand);
+        break;
+      case 'start_right_click_hold':
+        result = bot.startRightClickHold(offHand);
+        break;
+      case 'stop_right_click_hold':
+        result = bot.stopRightClickHold();
+        break;
+      case 'left_click':
+        result = bot.leftClick();
+        break;
+      case 'start_left_click_hold':
+        result = bot.startLeftClickHold(intervalMs);
+        break;
+      case 'stop_left_click_hold':
+        result = bot.stopLeftClickHold();
+        break;
+      case 'drop_held':
+        result = await bot.dropHeldItem(all !== false);
+        break;
+      case 'consume':
+        result = await bot.consumeHeldItem();
+        break;
+      default:
+        return res.status(400).json({ error: `Unknown hand action: ${action}` });
+    }
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post(['/api/bots/:id/inventory-action', '/api/bot/inventory-action'], async (req, res) => {
+  try {
+    const bot = getTargetBot(req);
+    const { action, sourceSlot, destSlot, slot, destination, count, mouseButton, mode } = req.body;
+    let result = { success: true };
+    switch (action) {
+      case 'swap':
+      case 'move':
+        result = await bot.swapSlots(sourceSlot, destSlot);
+        break;
+      case 'drop':
+        result = await bot.dropSlot(slot, count);
+        break;
+      case 'equip':
+        result = await bot.equipSlot(slot, destination || 'hand');
+        break;
+      case 'click_window':
+        result = await bot.clickWindowSlot(slot, mouseButton || 0, mode || 0);
+        break;
+      default:
+        return res.status(400).json({ error: `Unknown inventory action: ${action}` });
+    }
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post(['/api/bots/:id/chat', '/api/bot/chat'], (req, res) => {
+  try {
+    const bot = getTargetBot(req);
+    const { message } = req.body;
+    bot.sendChat(message);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Shop Scraper & AI Wealth Analyzer Endpoints
+app.post(['/api/bots/:id/shop/crawl', '/api/shop/crawl'], async (req, res) => {
+  try {
+    const bot = getTargetBot(req);
+    const { command, delay } = req.body;
+    if (!bot.shopCrawler) {
+      return res.status(400).json({ error: 'Shop crawler is not initialized' });
+    }
+    if (delay) bot.shopCrawler.baseDelay = Math.max(500, parseInt(delay, 10));
+    bot.shopCrawler.startCrawl(command).catch(err => {
+      console.warn('[ShopCrawler Error]', err.message);
+    });
+    res.json({ success: true, message: `Shop crawl started for ${bot.botName}` });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post(['/api/bots/:id/shop/stop', '/api/shop/stop'], async (req, res) => {
+  try {
+    const bot = getTargetBot(req);
+    if (bot.shopCrawler) {
+      await bot.shopCrawler.stop();
+    }
+    res.json({ success: true, message: `Shop crawl stopped for ${bot.botName}` });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get(['/api/bots/:id/shop/catalog', '/api/shop/catalog'], (req, res) => {
+  try {
+    const bot = getTargetBot(req);
+    const host = req.query.host || bot.currentServer?.host;
+    const catalog = storage.getShopCatalog(host);
+    if (!catalog) {
+      return res.status(404).json({ error: 'No catalog found. Run a shop crawl first.' });
+    }
+    const analysis = analyzeEconomy(catalog);
+    res.json({ catalog, analysis });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post(['/api/bots/:id/shop/analyze', '/api/shop/analyze'], async (req, res) => {
+  try {
+    const bot = getTargetBot(req);
+    const host = req.body.host || bot.currentServer?.host;
+    const catalog = storage.getShopCatalog(host);
+    if (!catalog) {
+      return res.status(404).json({ error: 'No shop catalog found. Run a shop crawl first!' });
+    }
+
+    const analysis = analyzeEconomy(catalog);
+    let aiStrategy = null;
+
+    if (bot.aiChat && bot.aiChat.apiKey) {
+      const prompt = generateAiPrompt(catalog, analysis);
+      try {
+        const reply = await bot.aiChat.getReply(
+          'Owner',
+          prompt,
+          `Server: ${catalog.server}`,
+          '',
+          (log) => bot.emit('log', log)
+        );
+        aiStrategy = reply;
+      } catch (aiErr) {
+        console.warn('AI analysis call failed:', aiErr.message);
+      }
+    }
+
+    const markdownReport = generateMarkdownReport(analysis, aiStrategy?.text || aiStrategy);
+    const aiPrompt = generateAiPrompt(catalog, analysis);
+
+    res.json({
+      success: true,
+      analysis,
+      aiStrategy,
+      aiPrompt,
+      markdownReport
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get(['/api/bots/:id/shop/export', '/api/shop/export'], (req, res) => {
+  try {
+    const bot = getTargetBot(req);
+    const host = req.query.host || bot.currentServer?.host;
+    const catalog = storage.getShopCatalog(host);
+    if (!catalog) {
+      return res.status(404).send('No shop catalog found.');
+    }
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="shop_${host || 'catalog'}.json"`);
+    res.send(JSON.stringify(catalog, null, 2));
+  } catch (err) {
+    res.status(400).send(err.message);
+  }
+});
+
+// Diagnostic & Server list routes
 app.get('/api/debug', async (req, res) => {
   const results = { timestamp: new Date().toISOString() };
   const host = req.query.host || 'hyrixsmp3.aternos.me';
@@ -170,259 +461,123 @@ app.get('/api/settings', (req, res) => {
   res.json(storage.getSettings());
 });
 
-app.post('/api/settings', (req, res) => {
+app.post(['/api/bots/:id/settings', '/api/settings'], (req, res) => {
   try {
-    botManager.updateSettings(req.body);
-    res.json({ success: true, settings: botManager.settings });
+    const updated = storage.saveSettings(req.body);
+    for (const b of botPool.bots.values()) {
+      b.updateSettings(req.body);
+    }
+    io.emit('bot:settings', storage.getSettings());
+    res.json({ success: true, settings: updated });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-app.post('/api/bot/connect', (req, res) => {
+app.post(['/api/bots/:id/permitted-users', '/api/permitted-users'], (req, res) => {
   try {
-    const { host, port, username, version, loginPassword, autoLogin } = req.body;
-    if (!host) {
-      return res.status(400).json({ error: 'Server host is required' });
-    }
-    botManager.connect({ host, port, username, version, loginPassword, autoLogin });
-    res.json({ success: true, message: 'Connection initiated' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/bot/disconnect', (req, res) => {
-  try {
-    botManager.disconnect();
-    res.json({ success: true, message: 'Disconnected' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/inventory', (req, res) => {
-  res.json(botManager.getInventory());
-});
-
-app.post('/api/bot/action', (req, res) => {
-  try {
-    const { action } = req.body;
-    botManager.manualAction(action);
-    res.json({ success: true, action });
+    const bot = getTargetBot(req);
+    const updated = bot.addPermittedUsers(req.body.users);
+    io.emit('bot:settings', storage.getSettings());
+    res.json({ success: true, permittedUsers: updated });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
 });
 
-app.post('/api/bot/hand-action', async (req, res) => {
+app.delete(['/api/bots/:id/permitted-users/:username', '/api/permitted-users/:username'], (req, res) => {
   try {
-    const { action, slot, offHand, intervalMs, all } = req.body;
-    let result = { success: true };
-    switch (action) {
-      case 'set_hotbar':
-      case 'set_slot':
-        result = botManager.setQuickBarSlot(slot);
-        break;
-      case 'right_click':
-        result = botManager.rightClick(offHand);
-        break;
-      case 'start_right_click_hold':
-        result = botManager.startRightClickHold(offHand);
-        break;
-      case 'stop_right_click_hold':
-        result = botManager.stopRightClickHold();
-        break;
-      case 'left_click':
-        result = botManager.leftClick();
-        break;
-      case 'start_left_click_hold':
-        result = botManager.startLeftClickHold(intervalMs);
-        break;
-      case 'stop_left_click_hold':
-        result = botManager.stopLeftClickHold();
-        break;
-      case 'drop_held':
-        result = await botManager.dropHeldItem(all !== false);
-        break;
-      case 'consume':
-        result = await botManager.consumeHeldItem();
-        break;
-      default:
-        return res.status(400).json({ error: `Unknown hand action: ${action}` });
-    }
-    res.json(result);
+    const bot = getTargetBot(req);
+    const updated = bot.removePermittedUser(req.params.username);
+    io.emit('bot:settings', storage.getSettings());
+    res.json({ success: true, permittedUsers: updated });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
 });
 
-app.post('/api/bot/inventory-action', async (req, res) => {
-  try {
-    const { action, sourceSlot, destSlot, slot, destination, count, mouseButton, mode } = req.body;
-    let result = { success: true };
-    switch (action) {
-      case 'swap':
-      case 'move':
-        result = await botManager.swapSlots(sourceSlot, destSlot);
-        break;
-      case 'drop':
-        result = await botManager.dropSlot(slot, count);
-        break;
-      case 'equip':
-        result = await botManager.equipSlot(slot, destination || 'hand');
-        break;
-      case 'click_window':
-        result = await botManager.clickWindowSlot(slot, mouseButton || 0, mode || 0);
-        break;
-      default:
-        return res.status(400).json({ error: `Unknown inventory action: ${action}` });
-    }
-    res.json(result);
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
-app.post('/api/bot/chat', (req, res) => {
-  try {
-    const { message } = req.body;
-    botManager.sendChat(message);
-    res.json({ success: true });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
-// Shop Scraper & AI Wealth Analyzer Endpoints
-app.post('/api/shop/crawl', async (req, res) => {
-  try {
-    const { command, delay } = req.body;
-    if (!botManager.shopCrawler) {
-      return res.status(400).json({ error: 'Shop crawler is not initialized' });
-    }
-    if (delay) botManager.shopCrawler.baseDelay = Math.max(500, parseInt(delay, 10));
-    botManager.shopCrawler.startCrawl(command).catch(err => {
-      console.warn('[ShopCrawler Error]', err.message);
-    });
-    res.json({ success: true, message: 'Shop crawl started' });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
-app.post('/api/shop/stop', async (req, res) => {
-  try {
-    if (botManager.shopCrawler) {
-      await botManager.shopCrawler.stop();
-    }
-    res.json({ success: true, message: 'Shop crawl stopped' });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
-app.get('/api/shop/catalog', (req, res) => {
-  const host = req.query.host || botManager.currentServer?.host;
-  const catalog = storage.getShopCatalog(host);
-  if (!catalog) {
-    return res.status(404).json({ error: 'No catalog found. Run a shop crawl first.' });
-  }
-  const analysis = analyzeEconomy(catalog);
-  res.json({ catalog, analysis });
-});
-
-app.post('/api/shop/analyze', async (req, res) => {
-  try {
-    const host = req.body.host || botManager.currentServer?.host;
-    const catalog = storage.getShopCatalog(host);
-    if (!catalog) {
-      return res.status(404).json({ error: 'No shop catalog found. Run a shop crawl first!' });
-    }
-
-    const analysis = analyzeEconomy(catalog);
-    let aiStrategy = null;
-
-    if (botManager.aiChat && botManager.aiChat.apiKey) {
-      const prompt = generateAiPrompt(catalog, analysis);
-      try {
-        const reply = await botManager.aiChat.getReply(
-          'Owner',
-          prompt,
-          `Server: ${catalog.server}`,
-          '',
-          (log) => botManager.emit('log', log)
-        );
-        aiStrategy = reply;
-      } catch (aiErr) {
-        console.warn('AI analysis call failed:', aiErr.message);
-      }
-    }
-
-    const markdownReport = generateMarkdownReport(analysis, aiStrategy?.text || aiStrategy);
-    const aiPrompt = generateAiPrompt(catalog, analysis);
-
-    res.json({
-      success: true,
-      analysis,
-      aiStrategy,
-      aiPrompt,
-      markdownReport
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/shop/export', (req, res) => {
-  const host = req.query.host || botManager.currentServer?.host;
-  const catalog = storage.getShopCatalog(host);
-  if (!catalog) {
-    return res.status(404).send('No shop catalog found.');
-  }
-  res.setHeader('Content-Type', 'application/json');
-  res.setHeader('Content-Disposition', `attachment; filename="shop_${host || 'catalog'}.json"`);
-  res.send(JSON.stringify(catalog, null, 2));
-});
-
-// Socket.io Connection
+// Socket.io Connection & Multi-Bot Event Router
 io.on('connection', (socket) => {
-  // Send initial state on connection
-  socket.emit('bot:status', botManager.getStatus());
-  socket.emit('bot:inventory', botManager.getInventory());
+  // Initial state delivery
+  socket.emit('bots:updated', botPool.getBotSummaries());
   socket.emit('servers:updated', storage.getSavedServers());
   socket.emit('bot:settings', storage.getSettings());
 
-  const latestCat = storage.getShopCatalog(botManager.currentServer?.host);
-  if (latestCat) {
-    socket.emit('shop:catalog', latestCat);
+  const activeBot = botPool.getBot();
+  if (activeBot) {
+    socket.emit('bot:status', activeBot.getStatus());
+    socket.emit('bot:inventory', activeBot.getInventory());
+    const latestCat = storage.getShopCatalog(activeBot.currentServer?.host);
+    if (latestCat) {
+      socket.emit('shop:catalog', latestCat);
+    }
   }
 
-  socket.on('shop:crawl', (data) => {
-    if (botManager.shopCrawler) {
-      botManager.shopCrawler.startCrawl(data?.command).catch(e => {
-        socket.emit('shop:error', { message: e.message });
-      });
+  // Multi-bot pool controls
+  socket.on('bots:set_active', (id) => {
+    botPool.setActiveBot(id);
+    const bot = botPool.getBot(id);
+    if (bot) {
+      socket.emit('bot:status', bot.getStatus());
+      socket.emit('bot:inventory', bot.getInventory());
     }
   });
 
-  socket.on('shop:stop', () => {
-    if (botManager.shopCrawler) {
-      botManager.shopCrawler.stop();
-    }
+  socket.on('bots:connect_all', (data) => {
+    botPool.connectAll(data).catch((e) => {
+      socket.emit('bot:log', { type: 'error', text: `Connect All failed: ${e.message}` });
+    });
   });
 
-  socket.on('bot:connect', (data) => botManager.connect(data));
-  socket.on('bot:disconnect', () => botManager.disconnect());
-  socket.on('bot:action', (action) => {
+  socket.on('bots:disconnect_all', () => {
+    botPool.disconnectAll();
+  });
+
+  socket.on('bots:add', (botConfig) => {
     try {
-      botManager.manualAction(action);
+      botPool.addBot(botConfig);
+    } catch (e) {
+      socket.emit('bot:log', { type: 'error', text: `Add Bot failed: ${e.message}` });
+    }
+  });
+
+  socket.on('bots:remove', (id) => {
+    try {
+      botPool.removeBot(id);
+    } catch (e) {
+      socket.emit('bot:log', { type: 'error', text: `Remove Bot failed: ${e.message}` });
+    }
+  });
+
+  const resolveBot = (data) => {
+    const id = data?.botId || (typeof data === 'object' && data?.id) || botPool.activeBotId;
+    return botPool.getBot(id);
+  };
+
+  socket.on('bot:connect', (data) => {
+    const bot = resolveBot(data);
+    if (bot) bot.connect(data);
+  });
+
+  socket.on('bot:disconnect', (data) => {
+    const bot = resolveBot(data);
+    if (bot) bot.disconnect();
+  });
+
+  socket.on('bot:action', (data) => {
+    try {
+      const bot = resolveBot(data);
+      const action = typeof data === 'string' ? data : data?.action;
+      if (bot) bot.manualAction(action);
     } catch (e) {
       socket.emit('bot:log', { type: 'error', text: e.message });
     }
   });
+
   socket.on('bot:hand_action', async (data) => {
     try {
+      const bot = resolveBot(data);
+      if (!bot) return;
       const act = typeof data === 'string' ? data : data?.action;
       const offHand = data?.offHand;
       const slot = data?.slot;
@@ -431,34 +586,34 @@ io.on('connection', (socket) => {
       switch (act) {
         case 'set_hotbar':
         case 'set_slot':
-          botManager.setQuickBarSlot(slot);
+          bot.setQuickBarSlot(slot);
           break;
         case 'right_click':
-          botManager.rightClick(offHand);
+          bot.rightClick(offHand);
           break;
         case 'start_right_click_hold':
-          botManager.startRightClickHold(offHand);
+          bot.startRightClickHold(offHand);
           break;
         case 'stop_right_click_hold':
-          botManager.stopRightClickHold();
+          bot.stopRightClickHold();
           break;
         case 'left_click':
-          botManager.leftClick();
+          bot.leftClick();
           break;
         case 'start_left_click_hold':
-          botManager.startLeftClickHold(intervalMs);
+          bot.startLeftClickHold(intervalMs);
           break;
         case 'stop_left_click_hold':
-          botManager.stopLeftClickHold();
+          bot.stopLeftClickHold();
           break;
         case 'drop_held':
-          await botManager.dropHeldItem(all !== false);
+          await bot.dropHeldItem(all !== false);
           break;
         case 'consume':
-          await botManager.consumeHeldItem();
+          await bot.consumeHeldItem();
           break;
         default:
-          botManager.manualAction(act);
+          bot.manualAction(act);
       }
     } catch (e) {
       socket.emit('bot:log', { type: 'error', text: e.message });
@@ -467,20 +622,22 @@ io.on('connection', (socket) => {
 
   socket.on('bot:inventory_action', async (data) => {
     try {
+      const bot = resolveBot(data);
+      if (!bot) return;
       const { action, sourceSlot, destSlot, slot, destination, count, mouseButton, mode } = data || {};
       switch (action) {
         case 'swap':
         case 'move':
-          await botManager.swapSlots(sourceSlot, destSlot);
+          await bot.swapSlots(sourceSlot, destSlot);
           break;
         case 'drop':
-          await botManager.dropSlot(slot, count);
+          await bot.dropSlot(slot, count);
           break;
         case 'equip':
-          await botManager.equipSlot(slot, destination || 'hand');
+          await bot.equipSlot(slot, destination || 'hand');
           break;
         case 'click_window':
-          await botManager.clickWindowSlot(slot, mouseButton || 0, mode || 0);
+          await bot.clickWindowSlot(slot, mouseButton || 0, mode || 0);
           break;
         default:
           throw new Error(`Unknown inventory action: ${action}`);
@@ -490,29 +647,62 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('bot:set_hotbar', (slot) => {
+  socket.on('bot:set_hotbar', (data) => {
     try {
-      botManager.setQuickBarSlot(slot);
+      const bot = resolveBot(data);
+      const slot = typeof data === 'number' ? data : data?.slot;
+      if (bot) bot.setQuickBarSlot(slot);
     } catch (e) {
       socket.emit('bot:log', { type: 'error', text: e.message });
     }
   });
-  socket.on('bot:chat', (msg) => {
+
+  socket.on('bot:chat', (data) => {
     try {
-      botManager.sendChat(msg);
+      const bot = resolveBot(data);
+      const msg = typeof data === 'string' ? data : data?.message;
+      if (bot && msg) bot.sendChat(msg);
     } catch (e) {
       socket.emit('bot:log', { type: 'error', text: e.message });
     }
   });
-  socket.on('settings:update', (data) => botManager.updateSettings(data));
-  socket.on('seed:update', (seed) => {
-    botManager.updateSettings({ worldSeed: seed });
+
+  socket.on('shop:crawl', (data) => {
+    const bot = resolveBot(data);
+    if (bot?.shopCrawler) {
+      bot.shopCrawler.startCrawl(data?.command).catch((e) => {
+        socket.emit('shop:error', { botId: bot.botId, message: e.message });
+      });
+    }
+  });
+
+  socket.on('shop:stop', (data) => {
+    const bot = resolveBot(data);
+    if (bot?.shopCrawler) {
+      bot.shopCrawler.stop();
+    }
+  });
+
+  socket.on('settings:update', (data) => {
+    storage.saveSettings(data);
+    for (const b of botPool.bots.values()) {
+      b.updateSettings(data);
+    }
     io.emit('bot:settings', storage.getSettings());
-    io.emit('bot:status', botManager.getStatus());
   });
+
+  socket.on('seed:update', (seed) => {
+    storage.saveSettings({ worldSeed: seed });
+    for (const b of botPool.bots.values()) {
+      b.updateSettings({ worldSeed: seed });
+    }
+    io.emit('bot:settings', storage.getSettings());
+  });
+
   socket.on('permitted:add', (users) => {
     try {
-      const updated = botManager.addPermittedUsers(users);
+      const bot = botPool.getBot();
+      const updated = bot?.addPermittedUsers(users);
       io.emit('bot:settings', storage.getSettings());
       const label = Array.isArray(users) ? users.join(', ') : users;
       io.emit('bot:log', { type: 'system', text: `[Permissions] Added allowed user(s): ${label}` });
@@ -520,9 +710,11 @@ io.on('connection', (socket) => {
       socket.emit('bot:log', { type: 'error', text: e.message });
     }
   });
+
   socket.on('permitted:remove', (user) => {
     try {
-      botManager.removePermittedUser(user);
+      const bot = botPool.getBot();
+      const updated = bot?.removePermittedUser(user);
       io.emit('bot:settings', storage.getSettings());
       io.emit('bot:log', { type: 'system', text: `[Permissions] Removed user: ${user}` });
     } catch (e) {
@@ -531,32 +723,12 @@ io.on('connection', (socket) => {
   });
 });
 
-app.post('/api/permitted-users', (req, res) => {
-  try {
-    const { users } = req.body;
-    const updated = botManager.addPermittedUsers(users);
-    io.emit('bot:settings', storage.getSettings());
-    res.json({ success: true, permittedUsers: updated });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
-app.delete('/api/permitted-users/:username', (req, res) => {
-  try {
-    const updated = botManager.removePermittedUser(req.params.username);
-    io.emit('bot:settings', storage.getSettings());
-    res.json({ success: true, permittedUsers: updated });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
 const startServer = (port) => {
   const listener = server.listen(port, '0.0.0.0', () => {
     console.log(`===============================================`);
     console.log(` Minecraft AFK Bot Dashboard running!`);
     console.log(` Web UI: http://localhost:${port}`);
+    console.log(` Active Bots in Pool: ${botPool.bots.size}`);
     console.log(`===============================================`);
 
     // Auto-connect on startup only if MC_HOST is explicitly defined in environment or a saved server exists
@@ -586,7 +758,7 @@ const startServer = (port) => {
         };
         console.log(`[AutoConnect] Initiating auto-connect to ${target.host}:${target.port} as ${target.username}...`);
         setTimeout(() => {
-          botManager.connect(target);
+          botPool.getBot()?.connect(target);
         }, 2500);
       }
     }

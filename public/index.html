@@ -21,6 +21,21 @@
     </div>
   </header>
 
+  <!-- Multi-Bot Orchestration & Switcher Bar -->
+  <nav class="bot-switcher-bar">
+    <div class="bot-switcher-left">
+      <span class="bot-bar-label">🤖 BOTS:</span>
+      <div class="bot-tabs-container" id="bot-tabs-container">
+        <!-- Rendered dynamically by app.js: bot tabs with status dots -->
+      </div>
+    </div>
+    <div class="bot-bar-actions">
+      <button id="btn-add-bot-modal" class="btn btn-sm btn-secondary" title="Add another Bot instance">➕ Add Bot</button>
+      <button id="btn-connect-all" class="btn btn-sm btn-primary" title="Connect all bots to server">⚡ Connect All</button>
+      <button id="btn-disconnect-all" class="btn btn-sm btn-danger" title="Disconnect all bots">⏹️ Disconnect All</button>
+    </div>
+  </nav>
+
   <main class="app-main">
     <aside class="sidebar">
       
@@ -529,6 +544,46 @@
         </div>
       </div>
 
+    </div>
+  </dialog>
+
+  <!-- Add Bot to Pool Modal -->
+  <dialog id="modal-add-bot" class="modal">
+    <div class="modal-content" style="max-width: 480px;">
+      <div class="modal-header">
+        <h2>Add Bot to Pool</h2>
+        <button id="btn-close-add-bot" class="btn-close">×</button>
+      </div>
+      <form id="form-add-bot" class="modal-body compact-form" style="display:flex; flex-direction:column; gap:12px;">
+        <div class="setting-group" style="padding:0; margin:0;">
+          <label style="font-size:12px; font-weight:600; color:var(--text-main);">Bot Name / Minecraft Username</label>
+          <input type="text" id="inp-add-username" placeholder="e.g. MONALISA__ or MinerBot" required style="width:100%; margin-top:4px;">
+        </div>
+        <div class="row">
+          <div style="flex:2;">
+            <label style="font-size:11px; color:var(--text-muted);">Server Host / IP</label>
+            <input type="text" id="inp-add-host" placeholder="paid34.skilloraclouds.com" value="paid34.skilloraclouds.com" required style="width:100%;">
+          </div>
+          <div style="flex:1;">
+            <label style="font-size:11px; color:var(--text-muted);">Port</label>
+            <input type="number" id="inp-add-port" placeholder="25593" value="25593" required style="width:100%;">
+          </div>
+        </div>
+        <div class="row">
+          <div style="flex:1;">
+            <label style="font-size:11px; color:var(--text-muted);">Auth Password</label>
+            <input type="text" id="inp-add-password" placeholder="209801" value="209801" style="width:100%;">
+          </div>
+          <div style="flex:1;">
+            <label style="font-size:11px; color:var(--text-muted);">Version</label>
+            <input type="text" id="inp-add-version" placeholder="1.21.4" value="1.21.4" style="width:100%;">
+          </div>
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:8px;">
+          <button type="button" id="btn-cancel-add-bot" class="btn btn-secondary">Cancel</button>
+          <button type="submit" class="btn btn-primary">➕ Add Bot</button>
+        </div>
+      </form>
     </div>
   </dialog>
 
