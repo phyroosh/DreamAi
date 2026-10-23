@@ -50,6 +50,7 @@ export class BotPool extends EventEmitter {
       username: botConfig.username || rawUser,
       loginPassword: botConfig.loginPassword || '209801',
       autoLogin: botConfig.autoLogin !== false,
+      afterLoginCommand: botConfig.afterLoginCommand !== undefined ? String(botConfig.afterLoginCommand || '').trim() : '/smp',
       host: botConfig.host || 'paid34.skilloraclouds.com',
       port: Number(botConfig.port) || 25593,
       version: botConfig.version || '1.21.4',
@@ -152,6 +153,7 @@ export class BotPool extends EventEmitter {
         uptime: st.uptime,
         position: st.position,
         server: st.server || { host: bot.botConfig?.host, port: bot.botConfig?.port },
+        afterLoginCommand: bot.afterLoginCommand || bot.botConfig?.afterLoginCommand || '',
         isReconnecting: st.isReconnecting,
         isActive: id === this.activeBotId
       };

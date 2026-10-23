@@ -114,6 +114,36 @@ app.post('/api/bots/:id/active', (req, res) => {
   res.json({ success: true, activeBotId: botPool.activeBotId });
 });
 
+app.post('/api/bots/:id', (req, res) => {
+  try {
+    const bot = getTargetBot(req);
+    const updates = req.body || {};
+    if (updates.name) bot.botName = updates.name;
+    if (updates.username) bot.botConfig.username = updates.username;
+    if (updates.loginPassword !== undefined) bot.botConfig.loginPassword = updates.loginPassword;
+    if (updates.afterLoginCommand !== undefined) {
+      bot.afterLoginCommand = String(updates.afterLoginCommand || '').trim();
+      bot.botConfig.afterLoginCommand = bot.afterLoginCommand;
+    }
+    if (updates.autoLogin !== undefined) bot.botConfig.autoLogin = !!updates.autoLogin;
+    if (updates.host) bot.botConfig.host = updates.host;
+    if (updates.port) bot.botConfig.port = Number(updates.port);
+    if (updates.version) bot.botConfig.version = updates.version;
+
+    botPool.storage.saveBot({
+      ...bot.botConfig,
+      id: bot.botId,
+      name: bot.botName,
+      afterLoginCommand: bot.afterLoginCommand
+    });
+
+    botPool.emit('bots:updated', botPool.getBotSummaries());
+    res.json({ success: true, bot: bot.getStatus(), bots: botPool.getBotSummaries() });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.post('/api/bots/connect-all', async (req, res) => {
   try {
     const results = await botPool.connectAll(req.body);
@@ -166,6 +196,16 @@ app.post(['/api/bots/:id/connect', '/api/bot/connect'], (req, res) => {
     const version = body.version || bot.botConfig?.version;
     const loginPassword = body.loginPassword !== undefined ? body.loginPassword : bot.botConfig?.loginPassword;
     const autoLogin = body.autoLogin !== undefined ? body.autoLogin : bot.botConfig?.autoLogin;
+    if (body.afterLoginCommand !== undefined) {
+      bot.afterLoginCommand = String(body.afterLoginCommand || '').trim();
+      bot.botConfig.afterLoginCommand = bot.afterLoginCommand;
+      botPool.storage.saveBot({
+        ...bot.botConfig,
+        id: bot.botId,
+        name: bot.botName,
+        afterLoginCommand: bot.afterLoginCommand
+      });
+    }
     if (!host) {
       return res.status(400).json({ error: 'Server host is required' });
     }
@@ -562,7 +602,43 @@ io.on('connection', (socket) => {
 
   socket.on('bot:connect', (data) => {
     const bot = resolveBot(data);
-    if (bot) bot.connect(data);
+    if (bot) {
+      if (data?.afterLoginCommand !== undefined) {
+        bot.afterLoginCommand = String(data.afterLoginCommand || '').trim();
+        bot.botConfig.afterLoginCommand = bot.afterLoginCommand;
+        botPool.storage.saveBot({
+          ...bot.botConfig,
+          id: bot.botId,
+          name: bot.botName,
+          afterLoginCommand: bot.afterLoginCommand
+        });
+      }
+      bot.connect(data);
+    }
+  });
+
+  socket.on('bot:update_config', (data) => {
+    try {
+      const bot = resolveBot(data);
+      if (!bot) return;
+      if (data.afterLoginCommand !== undefined) {
+        bot.afterLoginCommand = String(data.afterLoginCommand || '').trim();
+        bot.botConfig.afterLoginCommand = bot.afterLoginCommand;
+      }
+      if (data.loginPassword !== undefined) bot.botConfig.loginPassword = data.loginPassword;
+      if (data.autoLogin !== undefined) bot.botConfig.autoLogin = !!data.autoLogin;
+      botPool.storage.saveBot({
+        ...bot.botConfig,
+        id: bot.botId,
+        name: bot.botName,
+        afterLoginCommand: bot.afterLoginCommand
+      });
+      io.emit('bots:updated', botPool.getBotSummaries());
+      socket.emit('bot:status', bot.getStatus());
+      socket.emit('bot:log', { type: 'system', text: `Saved settings for ${bot.botName}.` });
+    } catch (e) {
+      socket.emit('bot:log', { type: 'error', text: `Save config failed: ${e.message}` });
+    }
   });
 
   socket.on('bot:disconnect', (data) => {

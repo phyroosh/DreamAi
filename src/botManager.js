@@ -39,6 +39,8 @@ export class BotManager extends EventEmitter {
     this.botId = options.id || options.botId || 'bot_default';
     this.botName = options.name || options.username || 'Bot';
     this.botConfig = { ...options };
+    this.afterLoginCommand = options.afterLoginCommand !== undefined ? String(options.afterLoginCommand || '').trim() : '';
+    this.afterLoginExecuted = false;
     this.bot = null;
     this.state = STATES.DISCONNECTED;
     this.currentServer = null;
@@ -347,6 +349,7 @@ export class BotManager extends EventEmitter {
       state: this.state,
       server: this.currentServer,
       username: this.bot?.username || this.currentServer?.username || this.botConfig.username || this.settings.defaultUsername,
+      afterLoginCommand: this.afterLoginCommand || this.botConfig.afterLoginCommand || '',
       trustedPlayer: this.trustedPlayer,
       farmLocation: this.farmLocation,
       reconnectAttempts: this.reconnectAttempts,
@@ -955,6 +958,7 @@ export class BotManager extends EventEmitter {
         if (!authCompleted) {
           authCompleted = true;
           this.emit('log', { type: 'system', text: '✅ [Auto-Auth] Successfully authenticated with server!' });
+          this.executeAfterLoginCommand();
         }
         return;
       }
@@ -1304,6 +1308,9 @@ export class BotManager extends EventEmitter {
         }
 
         this.transitionTo(STATES.WAITING_FOR_TPA, 'Ready to receive teleport request');
+        if (!this.afterLoginExecuted) {
+          this.executeAfterLoginCommand();
+        }
       }, 2500);
 
       this.resetAntiAfkTimer();
@@ -1581,10 +1588,13 @@ export class BotManager extends EventEmitter {
   async performAntiAfkAction() {
     if (!this.bot || !this.hasSpawned() || !this.bot.entity) return;
 
-    // AFK Mode: Maintain absolute stillness
-    if (this.state === STATES.AFK) {
+    // AFK Mode with default stillness: Maintain farm stillness
+    const isStillMode = (this.botConfig.antiAfkMode === 'still') || (this.settings.antiAfkMode === 'still');
+    if (this.state === STATES.AFK && isStillMode) {
       try {
-        this.bot.clearControlStates();
+        if (typeof this.bot.clearControlStates === 'function') {
+          this.bot.clearControlStates();
+        }
       } catch (e) {}
 
       // Optional safe sustenance without movement
@@ -1594,10 +1604,10 @@ export class BotManager extends EventEmitter {
       return;
     }
 
-    // Outside of AFK (e.g. testing or non-AFK states), respect configured actions
+    // Configured Anti-AFK actions
     const actions = this.settings.antiAfkActions || {};
     try {
-      if (actions.swingArm) {
+      if (actions.swingArm && typeof this.bot.swingArm === 'function') {
         this.bot.swingArm('right');
       }
       if (actions.lookAround) {
@@ -1605,7 +1615,34 @@ export class BotManager extends EventEmitter {
         const currentPitch = this.bot.entity.pitch || 0;
         const newYaw = currentYaw + (Math.random() * 0.4 - 0.2);
         const newPitch = Math.max(-1.0, Math.min(1.0, currentPitch + (Math.random() * 0.2 - 0.1)));
-        await this.bot.look(newYaw, newPitch, true);
+        if (typeof this.bot.look === 'function') {
+          await this.bot.look(newYaw, newPitch, true);
+        }
+      }
+      if (actions.walkAround) {
+        await this.roamChamber(2200);
+      } else if (actions.microStep && typeof this.bot.setControlState === 'function') {
+        this.bot.setControlState('sneak', true);
+        const dir = Math.random() > 0.5 ? 'forward' : 'back';
+        this.bot.setControlState(dir, true);
+        setTimeout(() => {
+          if (this.bot && typeof this.bot.setControlState === 'function') {
+            this.bot.setControlState(dir, false);
+            this.bot.setControlState('sneak', false);
+          }
+        }, 180);
+      }
+      if (actions.jump && !actions.walkAround && typeof this.bot.setControlState === 'function') {
+        this.bot.setControlState('jump', true);
+        setTimeout(() => {
+          if (this.bot && typeof this.bot.setControlState === 'function') this.bot.setControlState('jump', false);
+        }, 300);
+      }
+      if (actions.sneak && !actions.walkAround && !actions.microStep && typeof this.bot.setControlState === 'function') {
+        this.bot.setControlState('sneak', true);
+        setTimeout(() => {
+          if (this.bot && typeof this.bot.setControlState === 'function') this.bot.setControlState('sneak', false);
+        }, 400);
       }
     } catch (e) {}
   }
@@ -1727,6 +1764,7 @@ export class BotManager extends EventEmitter {
     }
     this.isRoaming = false;
     this.isEating = false;
+    this.afterLoginExecuted = false;
     this.stopRightClickHold();
     this.stopLeftClickHold();
     this.clearWatchdog();
@@ -2049,49 +2087,379 @@ export class BotManager extends EventEmitter {
     return { success: true, slot: s };
   }
 
+  executeAfterLoginCommand() {
+    if (!this.bot || !this.hasSpawned() || this.afterLoginExecuted) return;
+    const cmd = (this.afterLoginCommand || this.botConfig.afterLoginCommand || '').trim();
+    if (!cmd) return;
+
+    this.afterLoginExecuted = true;
+    setTimeout(() => {
+      if (!this.bot || !this.hasSpawned()) return;
+      try {
+        const fullCmd = cmd.startsWith('/') ? cmd : `/${cmd}`;
+        this.emit('log', {
+          type: 'action',
+          text: `🚀 [After-Login] Executing configured post-login command: "${fullCmd}"`
+        });
+        if (typeof this.bot.chat === 'function') {
+          this.bot.chat(fullCmd);
+        }
+      } catch (err) {
+        this.emit('log', {
+          type: 'error',
+          text: `[After-Login] Failed to execute "${cmd}": ${err.message}`
+        });
+      }
+    }, 1200);
+  }
+
+  setControlState(control, state) {
+    if (!this.bot || !this.hasSpawned()) return;
+    if (typeof this.bot.setControlState === 'function') {
+      this.bot.setControlState(control, !!state);
+    }
+    this.emit('status', this.getStatus());
+  }
+
+  async roamChamber(durationMs = 2500) {
+    if (!this.bot || !this.hasSpawned() || !this.bot.entity || this.isRoaming) return;
+    this.isRoaming = true;
+
+    try {
+      // Pick random heading or turn relative to current yaw
+      const turnDelta = (Math.random() * Math.PI * 1.2) - (Math.PI * 0.6); // -108 to +108 deg
+      const newYaw = (this.bot.entity.yaw || 0) + turnDelta;
+      const newPitch = (Math.random() * 0.3) - 0.15;
+      if (typeof this.bot.look === 'function') {
+        await this.bot.look(newYaw, newPitch, true);
+      }
+
+      // Start moving forward
+      if (typeof this.bot.setControlState === 'function') {
+        this.bot.setControlState('forward', true);
+
+        // Occasional sprint (30% chance)
+        if (Math.random() > 0.7) {
+          this.bot.setControlState('sprint', true);
+        }
+
+        // Small jump if jump is enabled (40% chance)
+        if (this.settings.antiAfkActions?.jump && Math.random() > 0.6) {
+          this.bot.setControlState('jump', true);
+          setTimeout(() => {
+            if (this.bot && typeof this.bot.setControlState === 'function') {
+              this.bot.setControlState('jump', false);
+            }
+          }, 280);
+        }
+      }
+
+      const startTime = Date.now();
+      let lastPos = this.bot.entity.position && typeof this.bot.entity.position.clone === 'function' ? this.bot.entity.position.clone() : (this.bot.entity.position ? { ...this.bot.entity.position } : null);
+      let wallHitCount = 0;
+
+      // Monitor movement every 250ms during roam
+      while (Date.now() - startTime < durationMs) {
+        await new Promise(r => setTimeout(r, 250));
+        if (!this.bot || !this.hasSpawned() || !this.bot.entity) break;
+
+        const currentPos = this.bot.entity.position;
+        if (!currentPos || !lastPos) break;
+
+        const distMoved = typeof currentPos.distanceTo === 'function' 
+          ? currentPos.distanceTo(lastPos)
+          : Math.hypot((currentPos.x || 0) - (lastPos.x || 0), (currentPos.z || 0) - (lastPos.z || 0));
+
+        lastPos = typeof currentPos.clone === 'function' ? currentPos.clone() : { ...currentPos };
+
+        // If bot barely moved (< 0.08 blocks in 250ms), it's colliding against a wall or obstacle
+        if (distMoved < 0.08) {
+          wallHitCount++;
+          if (wallHitCount >= 2 && typeof this.bot.setControlState === 'function') {
+            // Hit a wall! Turn 120-180 degrees away
+            this.bot.setControlState('forward', false);
+            this.bot.setControlState('sprint', false);
+            const bounceYaw = (this.bot.entity.yaw || 0) + Math.PI * (0.7 + Math.random() * 0.6);
+            if (typeof this.bot.look === 'function') {
+              await this.bot.look(bounceYaw, 0, true);
+            }
+            this.bot.setControlState('forward', true);
+            wallHitCount = 0;
+          }
+        } else {
+          wallHitCount = 0;
+        }
+      }
+    } catch (err) {
+      // ignore
+    } finally {
+      if (this.bot && typeof this.bot.setControlState === 'function') {
+        try {
+          this.bot.setControlState('forward', false);
+          this.bot.setControlState('sprint', false);
+          this.bot.setControlState('jump', false);
+          this.bot.setControlState('back', false);
+          this.bot.setControlState('left', false);
+          this.bot.setControlState('right', false);
+          this.bot.setControlState('sneak', false);
+        } catch (e) {}
+      }
+      this.isRoaming = false;
+      this.emit('status', this.getStatus());
+    }
+  }
+
+  async performLobbySelection() {
+    if (!this.bot || !this.hasSpawned()) {
+      this.emit('log', { type: 'warn', text: '[Lobby Selector] Bot is not spawned in the world yet!' });
+      return false;
+    }
+
+    const bot = this.bot;
+
+    // Step 1: Find Nether Star or compass in hotbar
+    let hotbarSlot = 4; // default to slot 4
+    try {
+      if (bot.inventory && bot.inventory.slots) {
+        for (let s = 36; s <= 44; s++) {
+          const it = bot.inventory.slots[s];
+          if (it) {
+            const name = (it.name || '').toLowerCase();
+            const disp = (it.displayName || '').toLowerCase();
+            if (name.includes('nether_star') || name.includes('compass') || disp.includes('select') || disp.includes('server')) {
+              hotbarSlot = s - 36;
+              break;
+            }
+          }
+        }
+      }
+    } catch (e) {}
+
+    this.emit('log', { type: 'action', text: `[Lobby Selector] Equipping lobby item in hotbar slot ${hotbarSlot}...` });
+    try {
+      if (typeof bot.setQuickBarSlot === 'function') bot.setQuickBarSlot(hotbarSlot);
+    } catch (e) {}
+
+    await new Promise(r => setTimeout(r, 350));
+    this.emit('log', { type: 'action', text: '[Lobby Selector] Right-clicking item to open Server Selector GUI...' });
+
+    try {
+      if (typeof bot.activateItem === 'function') bot.activateItem();
+    } catch (e) {}
+
+    await new Promise(r => setTimeout(r, 600));
+
+    // If chest GUI is open, click Grass Block or slot 0
+    if (bot.currentWindow) {
+      const win = bot.currentWindow;
+      this.emit('log', { type: 'system', text: `[Lobby Selector] Window opened: "${win.title || 'Server Selector'}"` });
+      let targetSlot = 0;
+      if (win.slots) {
+        for (let i = 0; i < win.slots.length; i++) {
+          const it = win.slots[i];
+          if (it && (it.name?.includes('grass') || it.displayName?.toLowerCase().includes('smp'))) {
+            targetSlot = i;
+            break;
+          }
+        }
+      }
+      try {
+        if (typeof bot.clickWindow === 'function') {
+          await bot.clickWindow(targetSlot, 0, 0);
+          this.emit('log', { type: 'system', text: `✅ [Lobby Selector] Clicked slot ${targetSlot}! Joining SMP...` });
+          return true;
+        }
+      } catch (err) {
+        this.emit('log', { type: 'error', text: `[Lobby Selector] Window click failed: ${err.message}` });
+      }
+    }
+
+    return false;
+  }
+
   async manualAction(actionType) {
     if (!this.bot || !this.hasSpawned()) {
       throw new Error('Bot is not spawned in a world');
     }
 
-    const act = typeof actionType === 'string' ? actionType : (actionType?.action || '');
+    const act = typeof actionType === 'string' ? actionType.toLowerCase().trim() : (actionType?.action || '').toLowerCase().trim();
+    const duration = (typeof actionType === 'object' && actionType.duration) || 600;
+
     switch (act) {
+      // Directional WASD Movements
+      case 'forward':
+      case 'move_forward':
+      case 'w':
+        if (typeof this.bot.setControlState === 'function') {
+          this.bot.setControlState('forward', true);
+        }
+        this.emit('log', { type: 'action', text: 'Manual: Moving forward' });
+        setTimeout(() => {
+          if (this.bot && typeof this.bot.setControlState === 'function') {
+            this.bot.setControlState('forward', false);
+            this.emit('status', this.getStatus());
+          }
+        }, duration);
+        break;
+
+      case 'back':
+      case 'backward':
+      case 'move_back':
+      case 's':
+        if (typeof this.bot.setControlState === 'function') {
+          this.bot.setControlState('back', true);
+        }
+        this.emit('log', { type: 'action', text: 'Manual: Moving backward' });
+        setTimeout(() => {
+          if (this.bot && typeof this.bot.setControlState === 'function') {
+            this.bot.setControlState('back', false);
+            this.emit('status', this.getStatus());
+          }
+        }, duration);
+        break;
+
+      case 'left':
+      case 'move_left':
+      case 'strafe_left':
+      case 'a':
+        if (typeof this.bot.setControlState === 'function') {
+          this.bot.setControlState('left', true);
+        }
+        this.emit('log', { type: 'action', text: 'Manual: Strafing left' });
+        setTimeout(() => {
+          if (this.bot && typeof this.bot.setControlState === 'function') {
+            this.bot.setControlState('left', false);
+            this.emit('status', this.getStatus());
+          }
+        }, duration);
+        break;
+
+      case 'right':
+      case 'move_right':
+      case 'strafe_right':
+      case 'd':
+        if (typeof this.bot.setControlState === 'function') {
+          this.bot.setControlState('right', true);
+        }
+        this.emit('log', { type: 'action', text: 'Manual: Strafing right' });
+        setTimeout(() => {
+          if (this.bot && typeof this.bot.setControlState === 'function') {
+            this.bot.setControlState('right', false);
+            this.emit('status', this.getStatus());
+          }
+        }, duration);
+        break;
+
+      case 'jump':
+      case 'space':
+        if (typeof this.bot.setControlState === 'function') {
+          this.bot.setControlState('jump', true);
+        }
+        this.emit('log', { type: 'action', text: 'Manual: Jumped' });
+        setTimeout(() => {
+          if (this.bot && typeof this.bot.setControlState === 'function') {
+            this.bot.setControlState('jump', false);
+            this.emit('status', this.getStatus());
+          }
+        }, 350);
+        break;
+
+      case 'sneak':
+      case 'shift':
+      case 'crouch': {
+        const currentSneak = typeof this.bot.getControlState === 'function' ? this.bot.getControlState('sneak') : false;
+        if (typeof this.bot.setControlState === 'function') {
+          this.bot.setControlState('sneak', !currentSneak);
+        }
+        this.emit('log', { type: 'action', text: `Manual: ${!currentSneak ? 'Sneaking (crouched)' : 'Stopped sneak'}` });
+        if (!currentSneak) {
+          setTimeout(() => {
+            if (this.bot && typeof this.bot.setControlState === 'function') {
+              this.bot.setControlState('sneak', false);
+              this.emit('status', this.getStatus());
+            }
+          }, 1500);
+        }
+        break;
+      }
+
+      case 'walk':
+      case 'roam':
+      case 'move':
+        this.emit('log', { type: 'action', text: 'Manual: Roaming chamber (walking)' });
+        await this.roamChamber(2500);
+        break;
+
+      case 'look':
+      case 'look_around': {
+        const curYaw = this.bot.entity?.yaw || 0;
+        const curPitch = this.bot.entity?.pitch || 0;
+        const newYaw = curYaw + (Math.random() * 1.0 - 0.5);
+        const newPitch = Math.max(-1.0, Math.min(1.0, curPitch + (Math.random() * 0.4 - 0.2)));
+        if (typeof this.bot.look === 'function') {
+          await this.bot.look(newYaw, newPitch, true);
+        }
+        this.emit('log', { type: 'action', text: 'Manual: Looked around' });
+        break;
+      }
+
+      case 'lobby_select':
+      case 'join_smp':
+        await this.performLobbySelection();
+        break;
+
       case 'eat':
+      case 'eat_food':
         await this.eatFood();
         break;
+
       case 'swing':
       case 'left_click':
         this.leftClick();
         break;
+
       case 'start_left_click_hold':
         this.startLeftClickHold();
         break;
+
       case 'stop_left_click_hold':
         this.stopLeftClickHold();
         break;
+
       case 'right_click':
         this.rightClick();
         break;
+
       case 'start_right_click_hold':
         this.startRightClickHold();
         break;
+
       case 'stop_right_click_hold':
         this.stopRightClickHold();
         break;
+
       case 'drop_held':
+      case 'drop':
         await this.dropHeldItem(true);
         break;
+
       case 'consume':
         await this.consumeHeldItem();
         break;
+
       case 'accept_tpa':
         this.bot.chat('/tpaccept');
         this.emit('log', { type: 'action', text: 'Manual: Sent /tpaccept' });
         break;
+
       case 'stand_still':
-        this.bot.clearControlStates();
+      case 'stop':
+        if (typeof this.bot.clearControlStates === 'function') {
+          this.bot.clearControlStates();
+        }
         this.emit('log', { type: 'action', text: 'Manual: Enforced standstill' });
         break;
+
       default:
         throw new Error(`Unknown manual action: ${act}`);
     }

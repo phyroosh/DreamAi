@@ -69,6 +69,15 @@ const btnOpenInventory = document.getElementById('btn-open-inventory');
 const hotbarActiveName = document.getElementById('hotbar-active-name');
 const hotbarStrip = document.getElementById('hotbar-strip');
 
+// D-Pad & Movement Controls
+const dpadContainer = document.getElementById('dpad-container');
+const moveButtons = document.querySelectorAll('[data-move]');
+const inpAfterLoginCmd = document.getElementById('inp-after-login-cmd');
+const btnSaveBotCmd = document.getElementById('btn-save-bot-cmd');
+const chatQuickActions = document.getElementById('chat-quick-actions');
+const quickCmdButtons = document.querySelectorAll('.btn-quick-cmd');
+const btnQuickTpa = document.getElementById('btn-quick-tpa');
+
 // Full Inventory Modal
 const modalInventory = document.getElementById('modal-inventory');
 const btnCloseInventory = document.getElementById('btn-close-inventory');
@@ -237,6 +246,9 @@ function selectActiveBot(botId) {
     if (targetBot.server) {
       if (inpHost && targetBot.server.host) inpHost.value = targetBot.server.host;
       if (inpPort && targetBot.server.port) inpPort.value = targetBot.server.port;
+    }
+    if (inpAfterLoginCmd) {
+      inpAfterLoginCmd.value = targetBot.afterLoginCommand || '/smp';
     }
   }
 
@@ -745,10 +757,76 @@ if (btnSlotDeselect) {
   };
 }
 
-// Global Keyboard Shortcuts (Keys 1-9 for Hotbar, E for Inv, Q for Drop)
+// Movement Controls (D-Pad & Action Buttons)
+if (moveButtons && moveButtons.length > 0) {
+  moveButtons.forEach((btn) => {
+    btn.onclick = () => {
+      const move = btn.dataset.move;
+      if (!move) return;
+      socket.emit('bot:action', { botId: activeBotId, action: move });
+      btn.classList.add('active');
+      setTimeout(() => btn.classList.remove('active'), 200);
+    };
+  });
+}
+
+// After Login Command Save Handler
+if (btnSaveBotCmd) {
+  btnSaveBotCmd.onclick = async () => {
+    const cmd = (inpAfterLoginCmd ? inpAfterLoginCmd.value.trim() : '');
+    if (!activeBotId) return alert('No bot active to configure');
+
+    // Emit live via socket
+    socket.emit('bot:update_config', { botId: activeBotId, afterLoginCommand: cmd });
+
+    // Persist to server storage
+    try {
+      const res = await fetch(`/api/bots/${activeBotId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ afterLoginCommand: cmd })
+      });
+      const data = await res.json();
+      if (data.bots) {
+        activeBots = data.bots;
+      }
+    } catch (e) {
+      console.warn('Failed to save after login command via REST:', e.message);
+    }
+
+    // Button feedback
+    const originalText = btnSaveBotCmd.innerHTML;
+    btnSaveBotCmd.innerHTML = '✅ Saved';
+    btnSaveBotCmd.disabled = true;
+    setTimeout(() => {
+      btnSaveBotCmd.innerHTML = originalText;
+      btnSaveBotCmd.disabled = false;
+    }, 1500);
+  };
+}
+
+// Chat Quick Commands Execution
+if (quickCmdButtons && quickCmdButtons.length > 0) {
+  quickCmdButtons.forEach((btn) => {
+    btn.onclick = () => {
+      let cmd = btn.dataset.cmd;
+      if (btn.id === 'btn-quick-tpa') {
+        const target = prompt('Enter player username to send /tpa to:', 'phyrooss');
+        if (!target || !target.trim()) return;
+        cmd = `/tpa ${target.trim()}`;
+      }
+      if (!cmd) return;
+      socket.emit('bot:chat', { botId: activeBotId, message: cmd });
+    };
+  });
+}
+
+// Global Keyboard Shortcuts (WASD Movement, Space Jump, Shift Sneak, Keys 1-9 for Hotbar, E for Inv, Q for Drop)
 document.addEventListener('keydown', (e) => {
   const tag = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
   if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+
+  const anyModalOpen = (modalInventory?.open || modalSettings?.open || modalShop?.open || modalAddBot?.open);
 
   // 1-9 for Hotbar selection
   if (e.key >= '1' && e.key <= '9') {
@@ -784,6 +862,61 @@ document.addEventListener('keydown', (e) => {
       renderFullInventoryModal();
       updateSlotActions();
     }
+    return;
+  }
+
+  // If a modal is open, ignore WASD physical movement controls
+  if (anyModalOpen) return;
+
+  const keyLower = e.key.toLowerCase();
+  if (keyLower === 'w' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    socket.emit('bot:action', { botId: activeBotId, action: 'forward' });
+    const b = document.getElementById('btn-move-w');
+    if (b) { b.classList.add('active'); setTimeout(() => b.classList.remove('active'), 200); }
+    return;
+  }
+  if (keyLower === 's' || e.key === 'ArrowDown') {
+    e.preventDefault();
+    socket.emit('bot:action', { botId: activeBotId, action: 'back' });
+    const b = document.getElementById('btn-move-s');
+    if (b) { b.classList.add('active'); setTimeout(() => b.classList.remove('active'), 200); }
+    return;
+  }
+  if (keyLower === 'a' || e.key === 'ArrowLeft') {
+    e.preventDefault();
+    socket.emit('bot:action', { botId: activeBotId, action: 'left' });
+    const b = document.getElementById('btn-move-a');
+    if (b) { b.classList.add('active'); setTimeout(() => b.classList.remove('active'), 200); }
+    return;
+  }
+  if (keyLower === 'd' || e.key === 'ArrowRight') {
+    e.preventDefault();
+    socket.emit('bot:action', { botId: activeBotId, action: 'right' });
+    const b = document.getElementById('btn-move-d');
+    if (b) { b.classList.add('active'); setTimeout(() => b.classList.remove('active'), 200); }
+    return;
+  }
+  if (e.code === 'Space') {
+    e.preventDefault();
+    socket.emit('bot:action', { botId: activeBotId, action: 'jump' });
+    const b = document.getElementById('btn-move-jump');
+    if (b) { b.classList.add('active'); setTimeout(() => b.classList.remove('active'), 200); }
+    return;
+  }
+  if (e.key === 'Shift') {
+    e.preventDefault();
+    socket.emit('bot:action', { botId: activeBotId, action: 'sneak' });
+    const b = document.getElementById('btn-move-sneak');
+    if (b) { b.classList.add('active'); setTimeout(() => b.classList.remove('active'), 200); }
+    return;
+  }
+  if (keyLower === 'x') {
+    e.preventDefault();
+    socket.emit('bot:action', { botId: activeBotId, action: 'stop' });
+    const b = document.getElementById('btn-move-stop');
+    if (b) { b.classList.add('active'); setTimeout(() => b.classList.remove('active'), 200); }
+    return;
   }
 });
 
@@ -828,6 +961,9 @@ function updateStatusUI(st) {
 
   if (st.isHoldingRightClick !== undefined) isHoldingRightClick = !!st.isHoldingRightClick;
   if (st.isHoldingLeftClick !== undefined) isHoldingLeftClick = !!st.isHoldingLeftClick;
+  if (st.afterLoginCommand !== undefined && inpAfterLoginCmd && document.activeElement !== inpAfterLoginCmd) {
+    inpAfterLoginCmd.value = st.afterLoginCommand;
+  }
   updateControlDeckUI();
 
   if (st.health !== undefined) valHealth.textContent = `${st.health}/20`;
@@ -1091,7 +1227,8 @@ formConnect.onsubmit = (e) => {
     username: inpUser.value.trim(),
     version: inpVersion.value.trim(),
     loginPassword: inpPass.value.trim(),
-    autoLogin: inpAutoLogin.checked
+    autoLogin: inpAutoLogin.checked,
+    afterLoginCommand: (inpAfterLoginCmd ? inpAfterLoginCmd.value.trim() : '/smp')
   });
 };
 

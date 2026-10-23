@@ -70,7 +70,23 @@ describe('Manual Control & Inventory Management', () => {
     };
     mockBot.equip = async (item, dest) => { mockBot._equipped = { item, dest }; };
     mockBot.clickWindow = async (slot, btn, mode) => { mockBot._clickedWindow = { slot, btn, mode }; };
-    mockBot.clearControlStates = () => {};
+    mockBot.controls = {};
+    mockBot.setControlState = (control, state) => {
+      mockBot.controls[control] = state;
+    };
+    mockBot.getControlState = (control) => {
+      return !!mockBot.controls[control];
+    };
+    mockBot.clearControlStates = () => {
+      mockBot.controls = {};
+    };
+    mockBot.look = async (yaw, pitch) => {
+      mockBot.yaw = yaw;
+      mockBot.pitch = pitch;
+    };
+    mockBot.chat = (msg) => {
+      mockBot._lastChat = msg;
+    };
 
     botManager.bot = mockBot;
     botManager.state = STATES.AFK;
@@ -179,5 +195,55 @@ describe('Manual Control & Inventory Management', () => {
     assert.equal(botManager.isHoldingRightClick, false);
     assert.equal(botManager.isHoldingLeftClick, false);
     assert.equal(botManager.leftClickInterval, null);
+  });
+
+  test('9. manualAction WASD movement controls activate directional states', async () => {
+    await botManager.manualAction('forward');
+    assert.equal(mockBot.controls.forward, true);
+
+    await botManager.manualAction('back');
+    assert.equal(mockBot.controls.back, true);
+
+    await botManager.manualAction('left');
+    assert.equal(mockBot.controls.left, true);
+
+    await botManager.manualAction('right');
+    assert.equal(mockBot.controls.right, true);
+  });
+
+  test('10. manualAction jump, sneak, and stop controls', async () => {
+    await botManager.manualAction('jump');
+    assert.equal(mockBot.controls.jump, true);
+
+    await botManager.manualAction('sneak');
+    assert.equal(mockBot.controls.sneak, true);
+
+    await botManager.manualAction('stop');
+    assert.deepEqual(mockBot.controls, {});
+  });
+
+  test('11. manualAction roam and look executes without throwing', async () => {
+    // roamChamber uses bot.look and setControlState
+    await assert.doesNotReject(async () => {
+      await botManager.manualAction('look');
+    });
+  });
+
+  test('12. executeAfterLoginCommand sends configured command once per connection', async () => {
+    botManager.afterLoginCommand = '/smp';
+    botManager.afterLoginExecuted = false;
+
+    botManager.executeAfterLoginCommand();
+    // Simulate delay
+    await new Promise(r => setTimeout(r, 1300));
+
+    assert.equal(mockBot._lastChat, '/smp');
+    assert.equal(botManager.afterLoginExecuted, true);
+
+    // Second call in same session should be ignored
+    mockBot._lastChat = null;
+    botManager.executeAfterLoginCommand();
+    await new Promise(r => setTimeout(r, 200));
+    assert.equal(mockBot._lastChat, null);
   });
 });

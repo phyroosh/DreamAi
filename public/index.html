@@ -116,6 +116,14 @@
               <input type="text" id="inp-password" placeholder="Password (for /login & /register)" value="209801">
               <input type="text" id="inp-version" placeholder="MC Version (1.21.4)" value="1.21.4">
               <label class="cb-label"><input type="checkbox" id="inp-autologin" checked> Auto-Auth (Login & Register)</label>
+              <div style="margin-top:6px; border-top:1px dashed var(--border); padding-top:6px;">
+                <label style="font-size:10px; font-weight:700; color:var(--accent); text-transform:uppercase; display:block; margin-bottom:3px;">⚡ After Login Command</label>
+                <div style="display:flex; gap:6px;">
+                  <input type="text" id="inp-after-login-cmd" placeholder="e.g. /smp or /warp afk" value="/smp" style="flex:1; font-family:monospace; font-size:11px;">
+                  <button type="button" id="btn-save-bot-cmd" class="btn btn-secondary btn-sm" title="Save command for active bot" style="font-size:11px; padding:4px 8px;">💾 Save</button>
+                </div>
+                <span style="font-size:10px; color:var(--text-muted); display:block; margin-top:2px;">Command executed immediately after logging in.</span>
+              </div>
             </div>
           </details>
           <div class="row">
@@ -164,9 +172,33 @@
       </div>
       <div id="terminal" class="terminal"></div>
 
-      <!-- Manual Control Deck (Hand Actions + Hotbar 1-9) -->
+      <!-- Manual Control Deck (Hand Actions, Movement & Hotbar 1-9) -->
       <div id="manual-control-deck" class="manual-control-deck hidden">
         <div class="deck-top-row">
+          <!-- Movement Controls (D-Pad & Actions) -->
+          <div class="deck-group deck-movement-group">
+            <span class="deck-label">MOVEMENT (WASD)</span>
+            <div class="deck-movement-container">
+              <div class="dpad-grid" id="dpad-container" title="Use buttons or physical W/A/S/D keys">
+                <div></div>
+                <button type="button" class="btn-dpad" id="btn-move-w" data-move="forward" title="Move Forward (W)">▲<span class="key-hint">W</span></button>
+                <div></div>
+                <button type="button" class="btn-dpad" id="btn-move-a" data-move="left" title="Strafe Left (A)">◀<span class="key-hint">A</span></button>
+                <button type="button" class="btn-dpad btn-dpad-center" id="btn-move-stop" data-move="stop" title="Stop (X)">⏹</button>
+                <button type="button" class="btn-dpad" id="btn-move-d" data-move="right" title="Strafe Right (D)">▶<span class="key-hint">D</span></button>
+                <div></div>
+                <button type="button" class="btn-dpad" id="btn-move-s" data-move="back" title="Move Backward (S)">▼<span class="key-hint">S</span></button>
+                <div></div>
+              </div>
+              <div class="movement-actions-column">
+                <button type="button" class="btn btn-action btn-sm" id="btn-move-jump" data-move="jump" title="Jump (Space)">🦘 Jump</button>
+                <button type="button" class="btn btn-action btn-sm" id="btn-move-sneak" data-move="sneak" title="Toggle Sneak (Shift)">🧎 Sneak</button>
+                <button type="button" class="btn btn-action btn-sm" id="btn-move-walk" data-move="walk" title="Roam / Walk Chamber">🚶 Roam</button>
+                <button type="button" class="btn btn-action btn-sm" id="btn-move-look" data-move="look" title="Look Around">👀 Look</button>
+              </div>
+            </div>
+          </div>
+
           <div class="deck-group">
             <span class="deck-label">MOUSE & HAND</span>
             <div class="deck-buttons">
@@ -196,6 +228,18 @@
             <!-- 9 slots rendered by JS -->
           </div>
         </div>
+      </div>
+
+      <!-- Chat Quick Commands Execution Bar -->
+      <div id="chat-quick-actions" class="chat-quick-actions">
+        <span class="quick-cmd-label">QUICK:</span>
+        <button type="button" class="btn-quick-cmd btn-qc-green" data-cmd="/tpaccept" title="Accept Teleport Request">⚡ /tpaccept</button>
+        <button type="button" class="btn-quick-cmd btn-qc-red" data-cmd="/tpadeny" title="Deny Teleport Request">❌ /tpadeny</button>
+        <button type="button" class="btn-quick-cmd" data-cmd="/smp" title="Connect to SMP">🌐 /smp</button>
+        <button type="button" class="btn-quick-cmd" data-cmd="/shop" title="Open Server Shop">🛒 /shop</button>
+        <button type="button" class="btn-quick-cmd" data-cmd="/spawn" title="Teleport to Spawn">🏠 /spawn</button>
+        <button type="button" class="btn-quick-cmd" data-cmd="/home" title="Teleport Home">📍 /home</button>
+        <button type="button" class="btn-quick-cmd" id="btn-quick-tpa" title="Send TPA to Trusted Player">🤝 /tpa</button>
       </div>
 
       <form id="form-chat" class="chat-bar">

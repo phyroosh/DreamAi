@@ -199,4 +199,23 @@ describe('BotPool - Multi-Bot Orchestration & Monitoring', () => {
       bot.reconnectTimer = null;
     }
   });
+
+  test('9. afterLoginCommand is retained in summaries and custom bot additions', () => {
+    const pool = new BotPool(mockStorage);
+    const bot = pool.getBot('bot_aaswaam');
+    assert.equal(bot.afterLoginCommand, '/smp');
+
+    const summaries = pool.getBotSummaries();
+    const aaswaam = summaries.find(s => s.id === 'bot_aaswaam');
+    assert.equal(aaswaam.afterLoginCommand, '/smp');
+
+    const customBot = pool.addBot({
+      name: 'FarmerBot',
+      username: 'FarmerBot',
+      afterLoginCommand: '/warp farm'
+    });
+    assert.equal(customBot.afterLoginCommand, '/warp farm');
+    const customSummary = pool.getBotSummaries().find(s => s.id === customBot.botId);
+    assert.equal(customSummary.afterLoginCommand, '/warp farm');
+  });
 });
