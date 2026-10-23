@@ -880,8 +880,9 @@ export class BotManager extends EventEmitter {
       if (obj.value) result += extractText(obj.value);
       if (obj.extra) result += extractText(obj.extra);
       if (obj.translate) {
-        if (!obj.translate.startsWith('chat.type.')) {
-          result += `[${obj.translate}] `;
+        const transStr = typeof obj.translate === 'string' ? obj.translate : String(obj.translate?.text || obj.translate || '');
+        if (transStr && !transStr.startsWith('chat.type.')) {
+          result += `[${transStr}] `;
         }
       }
       if (obj.with) result += extractText(obj.with);
