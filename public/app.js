@@ -75,8 +75,26 @@ const moveButtons = document.querySelectorAll('[data-move]');
 const inpAfterLoginCmd = document.getElementById('inp-after-login-cmd');
 const btnSaveBotCmd = document.getElementById('btn-save-bot-cmd');
 const chatQuickActions = document.getElementById('chat-quick-actions');
-const quickCmdButtons = document.querySelectorAll('.btn-quick-cmd');
-const btnQuickTpa = document.getElementById('btn-quick-tpa');
+
+// Quick Commands & Manager
+const quickCmdList = document.getElementById('quick-cmd-list');
+const btnManageQuickCmds = document.getElementById('btn-manage-quick-cmds');
+const modalQuickCommands = document.getElementById('modal-quick-commands');
+const btnCloseQuickCmds = document.getElementById('btn-close-quick-cmds');
+const btnDoneQuickCmds = document.getElementById('btn-done-quick-cmds');
+const formQuickCmd = document.getElementById('form-quick-cmd');
+const inpQcId = document.getElementById('inp-qc-id');
+const inpQcCmd = document.getElementById('inp-qc-cmd');
+const inpQcLabel = document.getElementById('inp-qc-label');
+const selQcColor = document.getElementById('sel-qc-color');
+const qcFormTitle = document.getElementById('qc-form-title');
+const btnSaveQc = document.getElementById('btn-save-qc');
+const btnCancelQcEdit = document.getElementById('btn-cancel-qc-edit');
+const btnResetQuickCmds = document.getElementById('btn-reset-quick-cmds');
+const quickCmdsManageList = document.getElementById('quick-cmds-manage-list');
+const countQuickCmds = document.getElementById('count-quick-cmds');
+
+let currentQuickCommands = [];
 
 // Full Inventory Modal
 const modalInventory = document.getElementById('modal-inventory');
@@ -805,20 +823,196 @@ if (btnSaveBotCmd) {
   };
 }
 
-// Chat Quick Commands Execution
-if (quickCmdButtons && quickCmdButtons.length > 0) {
-  quickCmdButtons.forEach((btn) => {
-    btn.onclick = () => {
-      let cmd = btn.dataset.cmd;
-      if (btn.id === 'btn-quick-tpa') {
-        const target = prompt('Enter player username to send /tpa to:', 'phyrooss');
-        if (!target || !target.trim()) return;
-        cmd = `/tpa ${target.trim()}`;
-      }
-      if (!cmd) return;
-      socket.emit('bot:chat', { botId: activeBotId, message: cmd });
-    };
+// ============================================================================
+// Quick Commands Management & Execution
+// ============================================================================
+function executeQuickCommand(cmdItem) {
+  let cmd = (cmdItem?.command || '').trim();
+  if (!cmd) return;
+
+  // Check if command requires prompt/parameter
+  const hasPlaceholder = /<[^>]+>|\{[^}]+\}/.test(cmd);
+  const isTargetedCmd = /^\/(tpa|msg|tell|w|pay|tp)\b/i.test(cmd) && !cmd.includes(' ');
+
+  if (hasPlaceholder) {
+    const match = cmd.match(/<([^>]+)>|\{([^}]+)\}/);
+    const placeholder = match[1] || match[2] || 'value';
+    const input = prompt(`Enter ${placeholder} for command: ${cmd}`);
+    if (!input || !input.trim()) return;
+    cmd = cmd.replace(match[0], input.trim());
+  } else if (isTargetedCmd) {
+    const target = prompt(`Enter player username for ${cmd}:`, 'phyrooss');
+    if (!target || !target.trim()) return;
+    cmd = `${cmd} ${target.trim()}`;
+  }
+
+  socket.emit('bot:chat', { botId: activeBotId, message: cmd });
+}
+
+function renderQuickCommands() {
+  if (!quickCmdList) return;
+  quickCmdList.innerHTML = '';
+
+  if (!currentQuickCommands || currentQuickCommands.length === 0) {
+    quickCmdList.innerHTML = '<span style="font-size:10px; color:var(--text-muted); font-style:italic;">No quick commands. Click ⚙️ Edit to add.</span>';
+    return;
+  }
+
+  currentQuickCommands.forEach((item) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    const colorClass = item.color && item.color !== 'default' ? `btn-qc-${item.color}` : '';
+    btn.className = `btn-quick-cmd ${colorClass}`.trim();
+    btn.textContent = item.label || item.command;
+    btn.title = `Execute: ${item.command}`;
+    btn.onclick = () => executeQuickCommand(item);
+    quickCmdList.appendChild(btn);
   });
+}
+
+function renderQuickCmdsManageList() {
+  if (!quickCmdsManageList) return;
+  quickCmdsManageList.innerHTML = '';
+  if (countQuickCmds) countQuickCmds.textContent = currentQuickCommands.length;
+
+  if (!currentQuickCommands || currentQuickCommands.length === 0) {
+    quickCmdsManageList.innerHTML = '<div style="font-size:11px; color:var(--text-muted); text-align:center; padding:12px;">No quick commands yet. Add your first command above!</div>';
+    return;
+  }
+
+  currentQuickCommands.forEach((item) => {
+    const row = document.createElement('div');
+    row.className = 'qc-item-row';
+    const colorClass = item.color && item.color !== 'default' ? `btn-qc-${item.color}` : '';
+
+    row.innerHTML = `
+      <div class="qc-item-info">
+        <span class="qc-pill-preview ${colorClass}">${item.label || item.command}</span>
+        <span class="qc-cmd-text" title="${item.command}">${item.command}</span>
+      </div>
+      <div class="qc-item-actions">
+        <button type="button" class="btn btn-secondary btn-sm btn-qc-edit-item" style="padding: 3px 7px; font-size: 11px;" title="Edit this command">✏️ Edit</button>
+        <button type="button" class="btn btn-danger btn-sm btn-qc-del-item" style="padding: 3px 7px; font-size: 11px;" title="Delete this command">🗑️</button>
+      </div>
+    `;
+
+    row.querySelector('.btn-qc-edit-item').onclick = () => {
+      inpQcId.value = item.id;
+      inpQcCmd.value = item.command;
+      inpQcLabel.value = item.label || '';
+      selQcColor.value = item.color || 'default';
+      qcFormTitle.textContent = `✏️ Edit Command: ${item.label || item.command}`;
+      btnSaveQc.textContent = '💾 Update Command';
+      btnCancelQcEdit.classList.remove('hidden');
+      inpQcCmd.focus();
+    };
+
+    row.querySelector('.btn-qc-del-item').onclick = () => {
+      if (confirm(`Delete quick command "${item.label || item.command}"?`)) {
+        currentQuickCommands = currentQuickCommands.filter(c => c.id !== item.id);
+        saveQuickCommandsToServer();
+      }
+    };
+
+    quickCmdsManageList.appendChild(row);
+  });
+}
+
+async function saveQuickCommandsToServer() {
+  renderQuickCommands();
+  renderQuickCmdsManageList();
+
+  socket.emit('quick_commands:update', currentQuickCommands);
+
+  try {
+    await fetch('/api/quick-commands', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ commands: currentQuickCommands })
+    });
+  } catch (err) {
+    console.warn('REST save error for quick commands:', err.message);
+  }
+}
+
+function resetQcForm() {
+  if (inpQcId) inpQcId.value = '';
+  if (inpQcCmd) inpQcCmd.value = '';
+  if (inpQcLabel) inpQcLabel.value = '';
+  if (selQcColor) selQcColor.value = 'default';
+  if (qcFormTitle) qcFormTitle.textContent = '➕ Add New Quick Command';
+  if (btnSaveQc) btnSaveQc.textContent = '➕ Add Command';
+  if (btnCancelQcEdit) btnCancelQcEdit.classList.add('hidden');
+}
+
+if (formQuickCmd) {
+  formQuickCmd.onsubmit = (e) => {
+    e.preventDefault();
+    const cmd = inpQcCmd.value.trim();
+    if (!cmd) return;
+    const label = inpQcLabel.value.trim() || cmd;
+    const color = selQcColor.value || 'default';
+    const existingId = inpQcId.value.trim();
+
+    if (existingId) {
+      const target = currentQuickCommands.find(c => c.id === existingId);
+      if (target) {
+        target.command = cmd;
+        target.label = label;
+        target.color = color;
+      }
+    } else {
+      const newId = `qc_${Date.now()}`;
+      currentQuickCommands.push({ id: newId, command: cmd, label, color });
+    }
+
+    resetQcForm();
+    saveQuickCommandsToServer();
+  };
+}
+
+if (btnCancelQcEdit) {
+  btnCancelQcEdit.onclick = resetQcForm;
+}
+
+if (btnResetQuickCmds) {
+  btnResetQuickCmds.onclick = () => {
+    if (confirm('Reset quick commands to default buttons?')) {
+      currentQuickCommands = [
+        { id: 'qc_tpaccept', label: '⚡ /tpaccept', command: '/tpaccept', color: 'green' },
+        { id: 'qc_tpadeny', label: '❌ /tpadeny', command: '/tpadeny', color: 'red' },
+        { id: 'qc_smp', label: '🌐 /smp', command: '/smp', color: 'default' },
+        { id: 'qc_shop', label: '🛒 /shop', command: '/shop', color: 'default' },
+        { id: 'qc_spawn', label: '🏠 /spawn', command: '/spawn', color: 'default' },
+        { id: 'qc_home', label: '📍 /home', command: '/home', color: 'default' },
+        { id: 'qc_tpa', label: '🤝 /tpa', command: '/tpa', color: 'default' }
+      ];
+      resetQcForm();
+      saveQuickCommandsToServer();
+    }
+  };
+}
+
+if (btnManageQuickCmds) {
+  btnManageQuickCmds.onclick = () => {
+    if (modalQuickCommands) {
+      resetQcForm();
+      renderQuickCmdsManageList();
+      modalQuickCommands.showModal();
+    }
+  };
+}
+
+if (btnCloseQuickCmds) {
+  btnCloseQuickCmds.onclick = () => {
+    if (modalQuickCommands) modalQuickCommands.close();
+  };
+}
+
+if (btnDoneQuickCmds) {
+  btnDoneQuickCmds.onclick = () => {
+    if (modalQuickCommands) modalQuickCommands.close();
+  };
 }
 
 // Global Keyboard Shortcuts (WASD Movement, Space Jump, Shift Sneak, Keys 1-9 for Hotbar, E for Inv, Q for Drop)
@@ -826,7 +1020,7 @@ document.addEventListener('keydown', (e) => {
   const tag = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
   if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
 
-  const anyModalOpen = (modalInventory?.open || modalSettings?.open || modalShop?.open || modalAddBot?.open);
+  const anyModalOpen = (modalInventory?.open || modalSettings?.open || modalShop?.open || modalAddBot?.open || modalQuickCommands?.open);
 
   // 1-9 for Hotbar selection
   if (e.key >= '1' && e.key <= '9') {
@@ -1184,7 +1378,25 @@ socket.on('bot:settings', (st) => {
     afkOpts.style.pointerEvents = chkAntiAfk.checked ? 'auto' : 'none';
   }
   renderAllowedUsers(st.permittedUsers);
+  if (st.quickCommands) {
+    currentQuickCommands = st.quickCommands;
+    renderQuickCommands();
+    if (modalQuickCommands && modalQuickCommands.open) {
+      renderQuickCmdsManageList();
+    }
+  }
 });
+
+// Initial Quick Commands Load
+fetch('/api/settings')
+  .then(r => r.json())
+  .then(st => {
+    if (st && st.quickCommands) {
+      currentQuickCommands = st.quickCommands;
+      renderQuickCommands();
+    }
+  })
+  .catch(() => {});
 
 // UI Actions
 inpHost.addEventListener('input', () => {

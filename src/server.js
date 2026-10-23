@@ -520,6 +520,17 @@ app.post(['/api/bots/:id/settings', '/api/settings'], (req, res) => {
   }
 });
 
+app.post('/api/quick-commands', (req, res) => {
+  try {
+    const commands = req.body?.commands || req.body;
+    const updated = storage.saveSettings({ quickCommands: commands });
+    io.emit('bot:settings', storage.getSettings());
+    res.json({ success: true, quickCommands: updated.quickCommands });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post(['/api/bots/:id/permitted-users', '/api/permitted-users'], (req, res) => {
   try {
     const bot = getTargetBot(req);
@@ -771,6 +782,16 @@ io.on('connection', (socket) => {
       b.updateSettings(data);
     }
     io.emit('bot:settings', storage.getSettings());
+  });
+
+  socket.on('quick_commands:update', (commands) => {
+    try {
+      storage.saveSettings({ quickCommands: commands });
+      io.emit('bot:settings', storage.getSettings());
+      socket.emit('bot:log', { type: 'system', text: 'Saved quick commands.' });
+    } catch (e) {
+      socket.emit('bot:log', { type: 'error', text: `Failed to save quick commands: ${e.message}` });
+    }
   });
 
   socket.on('seed:update', (seed) => {

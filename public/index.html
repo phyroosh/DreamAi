@@ -233,13 +233,10 @@
       <!-- Chat Quick Commands Execution Bar -->
       <div id="chat-quick-actions" class="chat-quick-actions">
         <span class="quick-cmd-label">QUICK:</span>
-        <button type="button" class="btn-quick-cmd btn-qc-green" data-cmd="/tpaccept" title="Accept Teleport Request">⚡ /tpaccept</button>
-        <button type="button" class="btn-quick-cmd btn-qc-red" data-cmd="/tpadeny" title="Deny Teleport Request">❌ /tpadeny</button>
-        <button type="button" class="btn-quick-cmd" data-cmd="/smp" title="Connect to SMP">🌐 /smp</button>
-        <button type="button" class="btn-quick-cmd" data-cmd="/shop" title="Open Server Shop">🛒 /shop</button>
-        <button type="button" class="btn-quick-cmd" data-cmd="/spawn" title="Teleport to Spawn">🏠 /spawn</button>
-        <button type="button" class="btn-quick-cmd" data-cmd="/home" title="Teleport Home">📍 /home</button>
-        <button type="button" class="btn-quick-cmd" id="btn-quick-tpa" title="Send TPA to Trusted Player">🤝 /tpa</button>
+        <div id="quick-cmd-list" class="quick-cmd-list">
+          <!-- Populated dynamically by JS -->
+        </div>
+        <button type="button" id="btn-manage-quick-cmds" class="btn-quick-cmd btn-qc-manage" title="Add / Edit / Remove Quick Commands">⚙️ Edit</button>
       </div>
 
       <form id="form-chat" class="chat-bar">
@@ -628,6 +625,69 @@
           <button type="submit" class="btn btn-primary">➕ Add Bot</button>
         </div>
       </form>
+    </div>
+  </dialog>
+
+  <!-- Quick Commands Manager Modal -->
+  <dialog id="modal-quick-commands" class="modal">
+    <div class="modal-content" style="max-width: 540px;">
+      <div class="modal-header">
+        <div>
+          <h2 style="margin: 0; font-size: 16px;">⚡ Quick Commands Manager</h2>
+          <p style="margin: 3px 0 0 0; font-size: 11px; color: var(--text-muted);">
+            Add, edit, or delete one-click commands displayed above chat
+          </p>
+        </div>
+        <button id="btn-close-quick-cmds" class="btn-close">×</button>
+      </div>
+
+      <div class="modal-body" style="display: flex; flex-direction: column; gap: 14px; max-height: 70vh; overflow-y: auto; padding: 16px;">
+        <!-- Add / Edit Form -->
+        <form id="form-quick-cmd" class="compact-form" style="background: var(--bg-card); padding: 12px; border-radius: var(--rad); border: 1px solid var(--border);">
+          <input type="hidden" id="inp-qc-id" value="">
+          <div style="font-weight: 700; font-size: 11px; color: var(--accent); margin-bottom: 8px;" id="qc-form-title">➕ Add New Quick Command</div>
+          <div class="row" style="margin-bottom: 8px;">
+            <div style="flex: 2;">
+              <label style="font-size: 10px; color: var(--text-muted); font-weight: 600; display: block; margin-bottom: 2px;">COMMAND (sent to server)</label>
+              <input type="text" id="inp-qc-cmd" placeholder="e.g. /warp farm or /kit" required style="width: 100%; font-family: monospace; font-size: 11px;">
+            </div>
+            <div style="flex: 2;">
+              <label style="font-size: 10px; color: var(--text-muted); font-weight: 600; display: block; margin-bottom: 2px;">LABEL (button display)</label>
+              <input type="text" id="inp-qc-label" placeholder="e.g. 🌾 /warp farm" style="width: 100%; font-size: 11px;">
+            </div>
+            <div style="flex: 1.2;">
+              <label style="font-size: 10px; color: var(--text-muted); font-weight: 600; display: block; margin-bottom: 2px;">COLOR</label>
+              <select id="sel-qc-color" style="width: 100%; font-size: 11px; padding: 6px;">
+                <option value="default">Default</option>
+                <option value="green">Green (Accept)</option>
+                <option value="red">Red (Deny)</option>
+                <option value="blue">Blue (Info)</option>
+                <option value="amber">Amber (Warp)</option>
+                <option value="purple">Purple (Special)</option>
+              </select>
+            </div>
+          </div>
+          <div style="display: flex; justify-content: flex-end; gap: 6px;">
+            <button type="button" id="btn-cancel-qc-edit" class="btn btn-secondary btn-sm hidden">Cancel</button>
+            <button type="submit" id="btn-save-qc" class="btn btn-primary btn-sm">➕ Add Command</button>
+          </div>
+        </form>
+
+        <!-- Existing Commands List -->
+        <div>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <span style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Current Buttons (<span id="count-quick-cmds">0</span>)</span>
+            <button type="button" id="btn-reset-quick-cmds" class="btn btn-secondary btn-sm" style="font-size: 10px; padding: 2px 8px;">🔄 Reset Defaults</button>
+          </div>
+          <div id="quick-cmds-manage-list" class="quick-cmds-manage-list">
+            <!-- Dynamically rendered rows -->
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer" style="display: flex; justify-content: flex-end; padding: 10px 16px; border-top: 1px solid var(--border); background: var(--bg-surface);">
+        <button type="button" id="btn-done-quick-cmds" class="btn btn-primary btn-sm">Done</button>
+      </div>
     </div>
   </dialog>
 

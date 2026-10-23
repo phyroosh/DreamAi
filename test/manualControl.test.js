@@ -2,6 +2,7 @@ import { test, describe, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import EventEmitter from 'events';
 import { BotManager, STATES } from '../src/botManager.js';
+import { sanitizeQuickCommands, DEFAULT_QUICK_COMMANDS } from '../src/storage.js';
 
 describe('Manual Control & Inventory Management', () => {
   let mockStorage;
@@ -245,5 +246,29 @@ describe('Manual Control & Inventory Management', () => {
     botManager.executeAfterLoginCommand();
     await new Promise(r => setTimeout(r, 200));
     assert.equal(mockBot._lastChat, null);
+  });
+
+  test('13. Quick commands: sanitizeQuickCommands standardizes and assigns fallback ids', () => {
+    const raw = [
+      { command: '/warp farm', label: '🌾 Farm', color: 'green' },
+      { command: '  /kit pvp  ', color: 'invalid_color' },
+      { command: '', label: 'Empty' }
+    ];
+    const sanitized = sanitizeQuickCommands(raw);
+    assert.equal(sanitized.length, 2);
+    assert.equal(sanitized[0].command, '/warp farm');
+    assert.equal(sanitized[0].label, '🌾 Farm');
+    assert.equal(sanitized[0].color, 'green');
+    assert.ok(sanitized[0].id);
+
+    assert.equal(sanitized[1].command, '/kit pvp');
+    assert.equal(sanitized[1].label, '/kit pvp');
+    assert.equal(sanitized[1].color, 'default');
+  });
+
+  test('14. Quick commands: empty or invalid list reverts to DEFAULT_QUICK_COMMANDS', () => {
+    assert.deepEqual(sanitizeQuickCommands([]), DEFAULT_QUICK_COMMANDS);
+    assert.deepEqual(sanitizeQuickCommands(null), DEFAULT_QUICK_COMMANDS);
+    assert.deepEqual(sanitizeQuickCommands([{ command: '' }]), DEFAULT_QUICK_COMMANDS);
   });
 });

@@ -41,8 +41,32 @@ const DEFAULT_SETTINGS = {
   autoReconnectDelaySec: 10,
   maxReconnectAttempts: 10,
   tpaTimeoutSec: 25,
-  permittedUsers: []
+  permittedUsers: [],
+  quickCommands: [
+    { id: 'qc_tpaccept', label: '⚡ /tpaccept', command: '/tpaccept', color: 'green' },
+    { id: 'qc_tpadeny', label: '❌ /tpadeny', command: '/tpadeny', color: 'red' },
+    { id: 'qc_smp', label: '🌐 /smp', command: '/smp', color: 'default' },
+    { id: 'qc_shop', label: '🛒 /shop', command: '/shop', color: 'default' },
+    { id: 'qc_spawn', label: '🏠 /spawn', command: '/spawn', color: 'default' },
+    { id: 'qc_home', label: '📍 /home', command: '/home', color: 'default' },
+    { id: 'qc_tpa', label: '🤝 /tpa', command: '/tpa', color: 'default' }
+  ]
 };
+
+export const DEFAULT_QUICK_COMMANDS = DEFAULT_SETTINGS.quickCommands;
+
+export function sanitizeQuickCommands(commands) {
+  if (!Array.isArray(commands)) return [...DEFAULT_QUICK_COMMANDS];
+  const list = commands.map((c, idx) => {
+    const cmd = String(c?.command || '').trim();
+    if (!cmd) return null;
+    const label = String(c?.label || cmd).trim();
+    const id = c?.id ? String(c.id).trim() : `qc_${idx}_${Date.now()}`;
+    const color = ['green', 'red', 'blue', 'amber', 'purple', 'default'].includes(c?.color) ? c.color : 'default';
+    return { id, label, command: cmd, color };
+  }).filter(Boolean);
+  return list.length > 0 ? list : [...DEFAULT_QUICK_COMMANDS];
+}
 
 function sanitizeGuestUsers(users) {
   if (!Array.isArray(users)) return [];
@@ -74,6 +98,7 @@ export function getSettings() {
     const parsed = JSON.parse(data);
     const settings = { ...DEFAULT_SETTINGS, ...parsed };
     settings.permittedUsers = sanitizeGuestUsers(settings.permittedUsers);
+    settings.quickCommands = sanitizeQuickCommands(settings.quickCommands);
     return settings;
   } catch (err) {
     console.error('Error reading settings, resetting to defaults:', err.message);
@@ -88,6 +113,9 @@ export function saveSettings(settings) {
     const updated = { ...current, ...settings };
     if (updated.permittedUsers !== undefined) {
       updated.permittedUsers = sanitizeGuestUsers(updated.permittedUsers);
+    }
+    if (updated.quickCommands !== undefined) {
+      updated.quickCommands = sanitizeQuickCommands(updated.quickCommands);
     }
     fs.writeFileSync(SETTINGS_FILE, JSON.stringify(updated, null, 2));
     return updated;
