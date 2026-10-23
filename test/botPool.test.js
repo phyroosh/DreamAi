@@ -203,11 +203,11 @@ describe('BotPool - Multi-Bot Orchestration & Monitoring', () => {
   test('9. afterLoginCommand is retained in summaries and custom bot additions', () => {
     const pool = new BotPool(mockStorage);
     const bot = pool.getBot('bot_aaswaam');
-    assert.equal(bot.afterLoginCommand, '/smp');
+    assert.equal(bot.afterLoginCommand, '/home 1');
 
     const summaries = pool.getBotSummaries();
     const aaswaam = summaries.find(s => s.id === 'bot_aaswaam');
-    assert.equal(aaswaam.afterLoginCommand, '/smp');
+    assert.equal(aaswaam.afterLoginCommand, '/home 1');
 
     const customBot = pool.addBot({
       name: 'FarmerBot',

@@ -177,6 +177,14 @@ describe('Minecraft AFK Bot - Core State Machine & Workflow', () => {
     let clearControlsCalled = false;
     let lookCalled = false;
     let swingCalled = false;
+    botManager.settings.antiAfkActions = {
+      walkAround: false,
+      swingArm: false,
+      lookAround: false,
+      jump: false,
+      microStep: false,
+      sneak: false
+    };
 
     botManager.bot = new EventEmitter();
     botManager.bot.entity = { yaw: 0, pitch: 0, position: { x: 500, y: 72, z: -350 } };
@@ -241,5 +249,44 @@ describe('Minecraft AFK Bot - Core State Machine & Workflow', () => {
 
     const diag = await aiChatNoKey.diagnoseDisconnection('Connection timed out', []);
     assert.equal(diag, null);
+  });
+
+  test('9. Configured Anti-AFK actions execute movements (look, jump, swing, roam) when enabled', async () => {
+    botManager.state = STATES.AFK;
+    botManager.settings.antiAfkEnabled = true;
+    botManager.settings.antiAfkActions = {
+      walkAround: false,
+      swingArm: true,
+      lookAround: true,
+      jump: true,
+      microStep: true,
+      sneak: false
+    };
+
+    let lookCalled = false;
+    let swingCalled = false;
+    const controlStates = {};
+    let actionLog = null;
+
+    botManager.bot = new EventEmitter();
+    botManager.bot.entity = { yaw: 0, pitch: 0, position: { x: 100, y: 64, z: 200 } };
+    botManager.bot.look = async () => { lookCalled = true; };
+    botManager.bot.swingArm = () => { swingCalled = true; };
+    botManager.bot.setControlState = (ctrl, val) => { controlStates[ctrl] = val; };
+    botManager.bot.food = 20;
+
+    botManager.on('log', (entry) => {
+      if (entry.type === 'action' && entry.text.includes('[Anti-AFK]')) {
+        actionLog = entry.text;
+      }
+    });
+
+    await botManager.performAntiAfkAction();
+
+    assert.equal(lookCalled, true, 'Bot should look around when lookAround is enabled');
+    assert.equal(swingCalled, true, 'Bot should swing arm when swingArm is enabled');
+    assert.equal(controlStates.jump, true, 'Bot should set jump control state');
+    assert.equal(controlStates.sneak, true, 'Bot should set sneak control state for micro-step');
+    assert.ok(actionLog && actionLog.includes('look') && actionLog.includes('swing') && actionLog.includes('jump'), 'Action log should record executed actions');
   });
 });

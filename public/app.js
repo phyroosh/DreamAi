@@ -154,6 +154,7 @@ const selAiModel = document.getElementById('sel-aimodel');
 const inpPermittedUsers = document.getElementById('inp-permitted-users');
 const btnSaveUsers = document.getElementById('btn-save-users');
 const saveIndicator = document.getElementById('save-indicator');
+const afkSaveIndicator = document.getElementById('afk-save-indicator');
 const modalAllowedUsers = document.getElementById('modal-allowed-users');
 
 const homeAllowedUsers = document.getElementById('home-allowed-users');
@@ -266,7 +267,7 @@ function selectActiveBot(botId) {
       if (inpPort && targetBot.server.port) inpPort.value = targetBot.server.port;
     }
     if (inpAfterLoginCmd) {
-      inpAfterLoginCmd.value = targetBot.afterLoginCommand || '/smp';
+      inpAfterLoginCmd.value = targetBot.afterLoginCommand || '/home 1';
     }
   }
 
@@ -366,13 +367,25 @@ btnSettings.onclick = () => modalSettings.showModal();
 btnCloseSettings.onclick = () => modalSettings.close();
 
 const syncSettings = () => {
-  afkOpts.style.opacity = chkAntiAfk.checked ? '1' : '0.5';
-  afkOpts.style.pointerEvents = chkAntiAfk.checked ? 'auto' : 'none';
+  if (afkOpts) {
+    afkOpts.style.opacity = chkAntiAfk.checked ? '1' : '0.5';
+    afkOpts.style.pointerEvents = chkAntiAfk.checked ? 'auto' : 'none';
+  }
   
-  socket.emit('settings:update', {
+  const hasAnyMovement = !!(
+    (chkWalk && chkWalk.checked) ||
+    chkSwing.checked ||
+    chkLook.checked ||
+    chkJump.checked ||
+    (chkStep && chkStep.checked) ||
+    chkSneak.checked
+  );
+
+  const payload = {
     aiModel: selAiModel ? selAiModel.value : 'nvidia/nemotron-3-super-120b-a12b',
     antiAfkEnabled: chkAntiAfk.checked,
-    antiAfkIntervalSec: parseInt(inpInterval.value),
+    antiAfkMode: hasAnyMovement ? 'active' : 'still',
+    antiAfkIntervalSec: parseInt(inpInterval.value) || 8,
     autoEat: chkAutoEat ? chkAutoEat.checked : true,
     autoJoinSmp: chkAutoJoin ? chkAutoJoin.checked : true,
     antiAfkActions: {
@@ -383,7 +396,25 @@ const syncSettings = () => {
       microStep: chkStep ? chkStep.checked : false,
       sneak: chkSneak.checked
     }
-  });
+  };
+
+  socket.emit('settings:update', payload);
+
+  fetch('/api/settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  }).catch(() => {});
+
+  const showIndicator = (el) => {
+    if (!el) return;
+    el.style.opacity = '1';
+    clearTimeout(el._timeout);
+    el._timeout = setTimeout(() => { el.style.opacity = '0'; }, 1500);
+  };
+
+  showIndicator(afkSaveIndicator);
+  showIndicator(saveIndicator);
 };
 
 if (selAiModel) selAiModel.onchange = syncSettings;
@@ -1440,7 +1471,7 @@ formConnect.onsubmit = (e) => {
     version: inpVersion.value.trim(),
     loginPassword: inpPass.value.trim(),
     autoLogin: inpAutoLogin.checked,
-    afterLoginCommand: (inpAfterLoginCmd ? inpAfterLoginCmd.value.trim() : '/smp')
+    afterLoginCommand: (inpAfterLoginCmd ? inpAfterLoginCmd.value.trim() : '/home 1')
   });
 };
 

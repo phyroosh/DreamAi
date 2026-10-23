@@ -27,14 +27,14 @@ const DEFAULT_SETTINGS = {
   worldSeed: '',
   autoJoinSmp: false,
   antiAfkEnabled: true,
-  antiAfkMode: 'still', // 'still' = stand still (farm safe); 'subtle' = small safe nudge
-  antiAfkIntervalSec: 30,
+  antiAfkMode: 'active', // 'still' = stand still (farm safe); 'active' = roam/jump/look actions
+  antiAfkIntervalSec: 8,
   antiAfkActions: {
-    walkAround: false,
+    walkAround: true,
     swingArm: false,
-    lookAround: false,
-    jump: false,
-    microStep: false,
+    lookAround: true,
+    jump: true,
+    microStep: true,
     sneak: false
   },
   autoReconnect: true,
@@ -250,13 +250,13 @@ export const DEFAULT_BOTS = [
     username: 'Aaswaam',
     loginPassword: process.env.DEFAULT_PASSWORD || '209801',
     autoLogin: true,
-    afterLoginCommand: '/smp',
+    afterLoginCommand: '/home 1',
     host: 'paid34.skilloraclouds.com',
     port: 25593,
     version: '1.21.4',
     autoReconnect: true,
     antiAfkEnabled: true,
-    antiAfkMode: 'still'
+    antiAfkMode: 'active'
   },
   {
     id: 'bot_monalisa',
@@ -264,13 +264,13 @@ export const DEFAULT_BOTS = [
     username: 'MONALISA_99',
     loginPassword: process.env.DEFAULT_PASSWORD || '209801',
     autoLogin: true,
-    afterLoginCommand: '/smp',
+    afterLoginCommand: '/home 1',
     host: 'paid34.skilloraclouds.com',
     port: 25593,
     version: '1.21.4',
     autoReconnect: true,
     antiAfkEnabled: true,
-    antiAfkMode: 'still'
+    antiAfkMode: 'active'
   }
 ];
 
@@ -310,13 +310,13 @@ export function saveBot(botData) {
       username: botData.username || 'Bot',
       loginPassword: botData.loginPassword || '209801',
       autoLogin: botData.autoLogin !== false,
-      afterLoginCommand: botData.afterLoginCommand !== undefined ? String(botData.afterLoginCommand || '').trim() : (bots[existingIndex]?.afterLoginCommand || ''),
+      afterLoginCommand: botData.afterLoginCommand !== undefined ? String(botData.afterLoginCommand || '').trim() : (bots[existingIndex]?.afterLoginCommand || '/home 1'),
       host: botData.host || 'paid34.skilloraclouds.com',
       port: Number(botData.port) || 25593,
       version: botData.version || '1.21.4',
       autoReconnect: botData.autoReconnect !== false,
       antiAfkEnabled: botData.antiAfkEnabled !== false,
-      antiAfkMode: botData.antiAfkMode || 'still',
+      antiAfkMode: botData.antiAfkMode || 'active',
       updatedAt: new Date().toISOString()
     };
 

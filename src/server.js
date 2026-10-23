@@ -512,6 +512,11 @@ app.post(['/api/bots/:id/settings', '/api/settings'], (req, res) => {
     const updated = storage.saveSettings(req.body);
     for (const b of botPool.bots.values()) {
       b.updateSettings(req.body);
+      if (b.botConfig) {
+        if (req.body.antiAfkMode !== undefined) b.botConfig.antiAfkMode = req.body.antiAfkMode;
+        if (req.body.antiAfkEnabled !== undefined) b.botConfig.antiAfkEnabled = req.body.antiAfkEnabled;
+        botPool.storage.saveBot(b.botConfig);
+      }
     }
     io.emit('bot:settings', storage.getSettings());
     res.json({ success: true, settings: updated });
@@ -780,6 +785,11 @@ io.on('connection', (socket) => {
     storage.saveSettings(data);
     for (const b of botPool.bots.values()) {
       b.updateSettings(data);
+      if (b.botConfig) {
+        if (data.antiAfkMode !== undefined) b.botConfig.antiAfkMode = data.antiAfkMode;
+        if (data.antiAfkEnabled !== undefined) b.botConfig.antiAfkEnabled = data.antiAfkEnabled;
+        botPool.storage.saveBot(b.botConfig);
+      }
     }
     io.emit('bot:settings', storage.getSettings());
   });

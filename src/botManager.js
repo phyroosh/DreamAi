@@ -207,11 +207,23 @@ export class BotManager extends EventEmitter {
     if (newSettings.maxReconnectAttempts) {
       this.maxReconnectAttempts = Number(newSettings.maxReconnectAttempts);
     }
-    if (newSettings.aiModel && this.aiChat) {
-      this.aiChat.model = newSettings.aiModel;
+    if (newSettings.antiAfkActions) {
+      const acts = newSettings.antiAfkActions;
+      const hasAct = !!(acts.walkAround || acts.swingArm || acts.lookAround || acts.jump || acts.microStep || acts.sneak);
+      this.botConfig.antiAfkMode = hasAct ? 'active' : (newSettings.antiAfkMode || 'still');
+    } else if (newSettings.antiAfkMode) {
+      this.botConfig.antiAfkMode = newSettings.antiAfkMode;
     }
     if (this.hasSpawned()) {
       this.resetAntiAfkTimer();
+      // If anti-AFK is enabled and actions are configured, immediately trigger once for real-time feedback
+      if (this.settings.antiAfkEnabled && (newSettings.antiAfkActions || newSettings.antiAfkEnabled !== undefined)) {
+        const actions = this.settings.antiAfkActions || {};
+        const hasActions = !!(actions.walkAround || actions.swingArm || actions.lookAround || actions.jump || actions.microStep || actions.sneak);
+        if (hasActions) {
+          this.performAntiAfkAction().catch(() => {});
+        }
+      }
     }
     this.emit('settings', this.settings);
     this.emit('status', this.getStatus());
@@ -252,7 +264,7 @@ export class BotManager extends EventEmitter {
       STATES.ACCEPTING_TPA,
       STATES.VERIFYING_TELEPORT,
       STATES.AFK
-    ].includes(this.state);
+    ].includes(this.state) || (this.bot && !!this.bot.entity);
   }
 
   getBotContext() {
@@ -1575,7 +1587,7 @@ export class BotManager extends EventEmitter {
       return;
     }
 
-    const intervalSec = this.settings.antiAfkIntervalSec || 30;
+    const intervalSec = this.settings.antiAfkIntervalSec || 8;
     this.antiAfkTimer = setTimeout(() => {
       this.performAntiAfkAction();
       this.resetAntiAfkTimer();
@@ -1583,22 +1595,24 @@ export class BotManager extends EventEmitter {
   }
 
   /**
-   * AFK Action: Absolute Stillness in AFK Mode!
-   * No moving, jumping, looking around, or punching while in AFK.
+   * AFK Action: Absolute Stillness in AFK Mode if no movement actions are enabled.
+   * If any movement actions are enabled, executes them and logs.
    */
   async performAntiAfkAction() {
     if (!this.bot || !this.hasSpawned() || !this.bot.entity) return;
 
-    // AFK Mode with default stillness: Maintain farm stillness
-    const isStillMode = (this.botConfig.antiAfkMode === 'still') || (this.settings.antiAfkMode === 'still');
-    if (this.state === STATES.AFK && isStillMode) {
+    const actions = this.settings.antiAfkActions || {};
+    const hasAnyAction = !!(actions.walkAround || actions.swingArm || actions.lookAround || actions.jump || actions.microStep || actions.sneak);
+
+    // If still mode is active and NO actions are configured, maintain absolute farm stillness
+    if (!hasAnyAction) {
       try {
         if (typeof this.bot.clearControlStates === 'function') {
           this.bot.clearControlStates();
         }
       } catch (e) {}
 
-      // Optional safe sustenance without movement
+      // Safe sustenance without movement
       if (this.settings.autoEat !== false) {
         await this.checkAutoEat();
       }
@@ -1606,23 +1620,39 @@ export class BotManager extends EventEmitter {
     }
 
     // Configured Anti-AFK actions
-    const actions = this.settings.antiAfkActions || {};
+    const performed = [];
     try {
-      if (actions.swingArm && typeof this.bot.swingArm === 'function') {
-        this.bot.swingArm('right');
-      }
       if (actions.lookAround) {
+        performed.push('look');
         const currentYaw = this.bot.entity.yaw || 0;
         const currentPitch = this.bot.entity.pitch || 0;
-        const newYaw = currentYaw + (Math.random() * 0.4 - 0.2);
-        const newPitch = Math.max(-1.0, Math.min(1.0, currentPitch + (Math.random() * 0.2 - 0.1)));
+        const newYaw = currentYaw + (Math.random() * 0.8 - 0.4);
+        const newPitch = Math.max(-1.0, Math.min(1.0, currentPitch + (Math.random() * 0.4 - 0.2)));
         if (typeof this.bot.look === 'function') {
           await this.bot.look(newYaw, newPitch, true);
         }
       }
+
+      if (actions.swingArm && typeof this.bot.swingArm === 'function') {
+        performed.push('swing');
+        this.bot.swingArm('right');
+      }
+
+      if (actions.jump && typeof this.bot.setControlState === 'function') {
+        performed.push('jump');
+        this.bot.setControlState('jump', true);
+        setTimeout(() => {
+          if (this.bot && typeof this.bot.setControlState === 'function') {
+            this.bot.setControlState('jump', false);
+          }
+        }, 300);
+      }
+
       if (actions.walkAround) {
+        performed.push('roam');
         await this.roamChamber(2200);
       } else if (actions.microStep && typeof this.bot.setControlState === 'function') {
+        performed.push('micro-step');
         this.bot.setControlState('sneak', true);
         const dir = Math.random() > 0.5 ? 'forward' : 'back';
         this.bot.setControlState(dir, true);
@@ -1631,19 +1661,28 @@ export class BotManager extends EventEmitter {
             this.bot.setControlState(dir, false);
             this.bot.setControlState('sneak', false);
           }
-        }, 180);
+        }, 220);
       }
-      if (actions.jump && !actions.walkAround && typeof this.bot.setControlState === 'function') {
-        this.bot.setControlState('jump', true);
-        setTimeout(() => {
-          if (this.bot && typeof this.bot.setControlState === 'function') this.bot.setControlState('jump', false);
-        }, 300);
-      }
-      if (actions.sneak && !actions.walkAround && !actions.microStep && typeof this.bot.setControlState === 'function') {
+
+      if (actions.sneak && !actions.microStep && !actions.walkAround && typeof this.bot.setControlState === 'function') {
+        performed.push('sneak');
         this.bot.setControlState('sneak', true);
         setTimeout(() => {
-          if (this.bot && typeof this.bot.setControlState === 'function') this.bot.setControlState('sneak', false);
+          if (this.bot && typeof this.bot.setControlState === 'function') {
+            this.bot.setControlState('sneak', false);
+          }
         }, 400);
+      }
+
+      if (this.settings.autoEat !== false) {
+        await this.checkAutoEat();
+      }
+
+      if (performed.length > 0) {
+        this.emit('log', {
+          type: 'action',
+          text: `[Anti-AFK] Executed actions: ${performed.join(', ')}`
+        });
       }
     } catch (e) {}
   }
@@ -2403,6 +2442,30 @@ export class BotManager extends EventEmitter {
         this.emit('log', { type: 'action', text: 'Manual: Looked around' });
         break;
       }
+
+      case 'step':
+      case 'micro_step':
+      case 'microstep': {
+        this.emit('log', { type: 'action', text: 'Manual: Safe micro-step' });
+        if (typeof this.bot.setControlState === 'function') {
+          this.bot.setControlState('sneak', true);
+          const dir = Math.random() > 0.5 ? 'forward' : 'back';
+          this.bot.setControlState(dir, true);
+          setTimeout(() => {
+            if (this.bot && typeof this.bot.setControlState === 'function') {
+              this.bot.setControlState(dir, false);
+              this.bot.setControlState('sneak', false);
+              this.emit('status', this.getStatus());
+            }
+          }, 220);
+        }
+        break;
+      }
+
+      case 'anti_afk':
+      case 'afk_action':
+        await this.performAntiAfkAction();
+        break;
 
       case 'lobby_select':
       case 'join_smp':

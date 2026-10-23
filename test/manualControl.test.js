@@ -231,14 +231,14 @@ describe('Manual Control & Inventory Management', () => {
   });
 
   test('12. executeAfterLoginCommand sends configured command once per connection', async () => {
-    botManager.afterLoginCommand = '/smp';
+    botManager.afterLoginCommand = '/home 1';
     botManager.afterLoginExecuted = false;
 
     botManager.executeAfterLoginCommand();
     // Simulate delay
     await new Promise(r => setTimeout(r, 1300));
 
-    assert.equal(mockBot._lastChat, '/smp');
+    assert.equal(mockBot._lastChat, '/home 1');
     assert.equal(botManager.afterLoginExecuted, true);
 
     // Second call in same session should be ignored

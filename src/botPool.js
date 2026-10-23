@@ -50,13 +50,13 @@ export class BotPool extends EventEmitter {
       username: botConfig.username || rawUser,
       loginPassword: botConfig.loginPassword || '209801',
       autoLogin: botConfig.autoLogin !== false,
-      afterLoginCommand: botConfig.afterLoginCommand !== undefined ? String(botConfig.afterLoginCommand || '').trim() : '/smp',
+      afterLoginCommand: botConfig.afterLoginCommand !== undefined ? String(botConfig.afterLoginCommand || '').trim() : '/home 1',
       host: botConfig.host || 'paid34.skilloraclouds.com',
       port: Number(botConfig.port) || 25593,
       version: botConfig.version || '1.21.4',
       autoReconnect: botConfig.autoReconnect !== false,
       antiAfkEnabled: botConfig.antiAfkEnabled !== false,
-      antiAfkMode: botConfig.antiAfkMode || 'still'
+      antiAfkMode: botConfig.antiAfkMode || 'active'
     };
 
     const bot = new BotManager(this.storage, normalizedConfig);

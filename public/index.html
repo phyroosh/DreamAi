@@ -119,7 +119,7 @@
               <div style="margin-top:6px; border-top:1px dashed var(--border); padding-top:6px;">
                 <label style="font-size:10px; font-weight:700; color:var(--accent); text-transform:uppercase; display:block; margin-bottom:3px;">⚡ After Login Command</label>
                 <div style="display:flex; gap:6px;">
-                  <input type="text" id="inp-after-login-cmd" placeholder="e.g. /smp or /warp afk" value="/smp" style="flex:1; font-family:monospace; font-size:11px;">
+                  <input type="text" id="inp-after-login-cmd" placeholder="e.g. /home 1 or /warp afk" value="/home 1" style="flex:1; font-family:monospace; font-size:11px;">
                   <button type="button" id="btn-save-bot-cmd" class="btn btn-secondary btn-sm" title="Save command for active bot" style="font-size:11px; padding:4px 8px;">💾 Save</button>
                 </div>
                 <span style="font-size:10px; color:var(--text-muted); display:block; margin-top:2px;">Command executed immediately after logging in.</span>
@@ -268,10 +268,13 @@
         </div>
 
         <div class="setting-group">
-          <label class="cb-label toggle-label">
-            <input type="checkbox" id="chk-antiafk" checked>
-            <strong>Enable Anti-AFK</strong>
-          </label>
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <label class="cb-label toggle-label" style="margin-bottom:0;">
+              <input type="checkbox" id="chk-antiafk" checked>
+              <strong>Enable Anti-AFK</strong>
+            </label>
+            <span id="afk-save-indicator" style="color:#34d399; font-size:12px; font-weight:600; opacity:0; transition:opacity 0.25s;">✓ Saved</span>
+          </div>
           <p class="help-text">Simulates human movements to avoid kicks.</p>
         </div>
         
