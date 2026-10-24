@@ -54,6 +54,7 @@ export class BotPool extends EventEmitter {
       host: botConfig.host || 'paid34.skilloraclouds.com',
       port: Number(botConfig.port) || 25593,
       version: botConfig.version || '1.21.4',
+      viewDistance: botConfig.viewDistance !== undefined ? Number(botConfig.viewDistance) : 32,
       autoReconnect: botConfig.autoReconnect !== false,
       antiAfkEnabled: botConfig.antiAfkEnabled !== false,
       antiAfkMode: botConfig.antiAfkMode || 'active'
@@ -153,6 +154,7 @@ export class BotPool extends EventEmitter {
         uptime: st.uptime,
         position: st.position,
         server: st.server || { host: bot.botConfig?.host, port: bot.botConfig?.port },
+        viewDistance: bot.viewDistance || 32,
         afterLoginCommand: bot.afterLoginCommand || bot.botConfig?.afterLoginCommand || '',
         isReconnecting: st.isReconnecting,
         isActive: id === this.activeBotId

@@ -226,18 +226,22 @@ describe('Minecraft AFK Bot - Core State Machine & Workflow', () => {
       botManager.reconnectTimer = null;
     }
 
-    // Attempt 3: Exceeds maxReconnectAttempts (2) -> transitions to ERROR
-    let errorLogged = false;
+    // Attempt 3: Exceeds maxReconnectAttempts (2) -> resets counter and continues retrying indefinitely
+    let warnLogged = false;
     botManager.on('log', (entry) => {
-      if (entry.type === 'error' && entry.text.includes('Maximum retry limit')) {
-        errorLogged = true;
+      if (entry.type === 'warn' && entry.text.includes('resetting counter and continuing to retry')) {
+        warnLogged = true;
       }
     });
 
     botManager.scheduleReconnect();
-    assert.equal(botManager.state, STATES.ERROR);
-    assert.equal(errorLogged, true);
-    assert.equal(botManager.reconnectTimer, null, 'No further timer should be scheduled');
+    assert.equal(botManager.state, STATES.RECONNECTING);
+    assert.equal(botManager.reconnectAttempts, 1);
+    assert.equal(warnLogged, true);
+    if (botManager.reconnectTimer) {
+      clearTimeout(botManager.reconnectTimer);
+      botManager.reconnectTimer = null;
+    }
   });
 
   test('8. LLM Interpreter safety: handles missing API key gracefully without errors', async () => {

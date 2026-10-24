@@ -309,6 +309,21 @@
         </div>
 
         <div class="setting-group" style="margin-top:8px; border-top:1px solid var(--border); padding-top:12px;">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <label style="font-size:13px; font-weight:700; color:var(--text-main); margin-bottom:0;">🔭 Bot Render Distance</label>
+            <span style="background:rgba(52,211,153,0.15); color:#34d399; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:700;">
+              Max: <span id="val-viewdistance">32</span> chunks
+            </span>
+          </div>
+          <p class="help-text" style="margin-left:0; margin-top:2px; margin-bottom:6px;">
+            Requests chunk loading around the bot up to the server's limit. Set to 32 (Max) so far-away farms and spawners stay loaded.
+          </p>
+          <div class="slider-group" style="margin-top:4px;">
+            <input type="range" id="inp-viewdistance" min="2" max="32" value="32" style="width:100%;">
+          </div>
+        </div>
+
+        <div class="setting-group" style="margin-top:8px; border-top:1px solid var(--border); padding-top:12px;">
           <h4>Manual Actions (Test)</h4>
           <div class="row" style="margin-top:6px;">
             <button class="btn btn-secondary btn-sm" data-action="walk">Walk</button>

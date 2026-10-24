@@ -150,6 +150,8 @@ const chkSneak = document.getElementById('chk-sneak');
 const chkStep = document.getElementById('chk-step');
 const inpInterval = document.getElementById('inp-interval');
 const valInterval = document.getElementById('val-interval');
+const inpViewDistance = document.getElementById('inp-viewdistance');
+const valViewDistance = document.getElementById('val-viewdistance');
 const selAiModel = document.getElementById('sel-aimodel');
 const inpPermittedUsers = document.getElementById('inp-permitted-users');
 const btnSaveUsers = document.getElementById('btn-save-users');
@@ -386,6 +388,7 @@ const syncSettings = () => {
     antiAfkEnabled: chkAntiAfk.checked,
     antiAfkMode: hasAnyMovement ? 'active' : 'still',
     antiAfkIntervalSec: parseInt(inpInterval.value) || 8,
+    viewDistance: inpViewDistance ? parseInt(inpViewDistance.value, 10) || 32 : 32,
     autoEat: chkAutoEat ? chkAutoEat.checked : true,
     autoJoinSmp: chkAutoJoin ? chkAutoJoin.checked : true,
     antiAfkActions: {
@@ -429,6 +432,12 @@ chkJump.onchange = syncSettings;
 chkSneak.onchange = syncSettings;
 inpInterval.oninput = () => { valInterval.textContent = inpInterval.value; };
 inpInterval.onchange = syncSettings;
+if (inpViewDistance) {
+  inpViewDistance.oninput = () => {
+    if (valViewDistance) valViewDistance.textContent = inpViewDistance.value;
+  };
+  inpViewDistance.onchange = syncSettings;
+}
 
 // Handle Adding Users from Home Page Form
 if (formHomeUser) {
@@ -1396,6 +1405,10 @@ socket.on('bot:settings', (st) => {
   if (chkAutoJoin && st.autoJoinSmp !== undefined) chkAutoJoin.checked = st.autoJoinSmp !== false;
   inpInterval.value = st.antiAfkIntervalSec || 10;
   valInterval.textContent = inpInterval.value;
+  if (inpViewDistance && st.viewDistance !== undefined) {
+    inpViewDistance.value = st.viewDistance;
+    if (valViewDistance) valViewDistance.textContent = st.viewDistance;
+  }
   if (st.antiAfkActions) {
     if (chkWalk) chkWalk.checked = st.antiAfkActions.walkAround !== false;
     chkSwing.checked = st.antiAfkActions.swingArm !== false;
@@ -1422,7 +1435,12 @@ socket.on('bot:settings', (st) => {
 fetch('/api/settings')
   .then(r => r.json())
   .then(st => {
-    if (st && st.quickCommands) {
+    if (!st) return;
+    if (inpViewDistance && st.viewDistance !== undefined) {
+      inpViewDistance.value = st.viewDistance;
+      if (valViewDistance) valViewDistance.textContent = st.viewDistance;
+    }
+    if (st.quickCommands) {
       currentQuickCommands = st.quickCommands;
       renderQuickCommands();
     }

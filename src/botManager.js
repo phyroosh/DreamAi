@@ -74,6 +74,7 @@ export class BotManager extends EventEmitter {
     this.settings = this.storage.getSettings();
     this.trustedPlayer = this.settings.trustedPlayer || process.env.TRUSTED_PLAYER || 'phyrooss';
     this.maxReconnectAttempts = Number(this.settings.maxReconnectAttempts || process.env.MAX_RECONNECT_ATTEMPTS || 10);
+    this.viewDistance = Number(options.viewDistance || this.settings.viewDistance || 32);
 
     // AI Companion & Physical Action Executor
     this.aiChat = new AiChatHandler({
@@ -206,6 +207,16 @@ export class BotManager extends EventEmitter {
     }
     if (newSettings.maxReconnectAttempts) {
       this.maxReconnectAttempts = Number(newSettings.maxReconnectAttempts);
+    }
+    if (newSettings.viewDistance !== undefined) {
+      this.viewDistance = Number(newSettings.viewDistance);
+      this.botConfig.viewDistance = this.viewDistance;
+      if (this.bot && typeof this.bot.setSettings === 'function') {
+        try {
+          this.bot.setSettings({ viewDistance: this.viewDistance });
+          this.emit('log', { type: 'system', text: `[SETTINGS] Render distance updated to ${this.viewDistance} chunks.` });
+        } catch (e) {}
+      }
     }
     if (newSettings.antiAfkActions) {
       const acts = newSettings.antiAfkActions;
@@ -382,6 +393,7 @@ export class BotManager extends EventEmitter {
       serverBrand,
       mcVersion,
       worldSeed: this.settings.worldSeed || '',
+      viewDistance: this.viewDistance || 32,
       onlinePlayers: this.getOnlinePlayers(),
       inventory: this.getInventory(),
       isReconnecting: this.state === STATES.RECONNECTING || !!this.reconnectTimer
@@ -573,6 +585,9 @@ export class BotManager extends EventEmitter {
 
     this.transitionTo(STATES.CONNECTING, `Connecting to ${targetIp || host}:${port}`);
 
+    const targetViewDistance = Number(serverConfig.viewDistance || this.botConfig.viewDistance || this.settings.viewDistance || 32);
+    this.viewDistance = targetViewDistance;
+
     const botOptions = {
       host: targetIp || host,
       port,
@@ -581,7 +596,8 @@ export class BotManager extends EventEmitter {
       auth: 'offline',
       skipValidation: true,
       keepAlive: false, // Prevents minecraft-protocol from running internal suicide timeout timer
-      checkTimeoutInterval: 120000
+      checkTimeoutInterval: 120000,
+      viewDistance: targetViewDistance
     };
 
     if (version && version !== 'auto') {
@@ -592,6 +608,10 @@ export class BotManager extends EventEmitter {
       this.clearWatchdog();
       const currentBot = mineflayer.createBot(botOptions);
       this.bot = currentBot;
+      this.emit('log', {
+        type: 'system',
+        text: `[SETTINGS] Render distance configured to maximum (${targetViewDistance} chunks). Server will load chunks up to its max allowed limit.`
+      });
 
       // 90s connection watchdog
       this.connectionWatchdog = setTimeout(() => {
@@ -1273,10 +1293,20 @@ export class BotManager extends EventEmitter {
 
     bot.on('login', () => {
       this.emit('log', { type: 'system', text: `Logged in to server as ${bot.username}` });
+      if (typeof bot.setSettings === 'function') {
+        try {
+          bot.setSettings({ viewDistance: this.viewDistance || 32 });
+        } catch (e) {}
+      }
     });
 
     bot.on('spawn', () => {
       this.spawnTime = Date.now();
+      if (typeof bot.setSettings === 'function') {
+        try {
+          bot.setSettings({ viewDistance: this.viewDistance || 32 });
+        } catch (e) {}
+      }
 
       // Reset reconnect counter only after remaining connected for 15s
       setTimeout(() => {
@@ -1332,6 +1362,13 @@ export class BotManager extends EventEmitter {
     bot.on('health', () => {
       this.emit('status', this.getStatus());
       this.checkAutoEat();
+    });
+
+    bot.on('death', () => {
+      this.emit('log', { type: 'warn', text: '[BOT] Bot died and will respawn. Will re-execute after-login command after respawn.' });
+      // Reset flag so /home 1 re-fires on the next spawn event (respawn at world spawn)
+      this.afterLoginExecuted = false;
+      this.farmLocation = null; // Clear farm location so spawn handler re-runs /home 1 unconditionally
     });
 
     bot.on('move', () => {
@@ -1857,16 +1894,13 @@ export class BotManager extends EventEmitter {
 
     this.reconnectAttempts++;
     if (this.reconnectAttempts > this.maxReconnectAttempts) {
-      if (this.reconnectTimer) {
-        clearTimeout(this.reconnectTimer);
-        this.reconnectTimer = null;
-      }
-      this.transitionTo(STATES.ERROR, `Max reconnect attempts reached (${this.maxReconnectAttempts})`);
+      // Instead of giving up permanently, reset the counter and keep retrying
+      // This ensures bots reconnect overnight even through prolonged server outages
+      this.reconnectAttempts = 1;
       this.emit('log', {
-        type: 'error',
-        text: `[ERROR] Reconnection failed. Reason: Maximum retry limit (${this.maxReconnectAttempts}) reached. Manual intervention required.`
+        type: 'warn',
+        text: `[RECONNECTING] Exceeded ${this.maxReconnectAttempts} attempts — resetting counter and continuing to retry indefinitely...`
       });
-      return;
     }
 
     const baseDelaySec = customDelay || Math.max(12, this.settings.autoReconnectDelaySec || 12);
