@@ -218,24 +218,4 @@ describe('BotPool - Multi-Bot Orchestration & Monitoring', () => {
     const customSummary = pool.getBotSummaries().find(s => s.id === customBot.botId);
     assert.equal(customSummary.afterLoginCommand, '/warp farm');
   });
-
-  test('10. viewDistance defaults to maximum (32 chunks) and is reflected across bot summaries and config', () => {
-    const pool = new BotPool(mockStorage);
-    const bot = pool.getBot('bot_aaswaam');
-    assert.equal(bot.viewDistance, 32);
-
-    const summaries = pool.getBotSummaries();
-    const aaswaam = summaries.find(s => s.id === 'bot_aaswaam');
-    assert.equal(aaswaam.viewDistance, 32);
-
-    const customBot = pool.addBot({
-      name: 'ChunkLoaderBot',
-      username: 'ChunkLoaderBot',
-      viewDistance: 32
-    });
-    assert.equal(customBot.viewDistance, 32);
-    const customSummary = pool.getBotSummaries().find(s => s.id === customBot.botId);
-    assert.equal(customSummary.viewDistance, 32);
-  });
 });
-

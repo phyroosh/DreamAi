@@ -39,9 +39,8 @@ const DEFAULT_SETTINGS = {
   },
   autoReconnect: true,
   autoReconnectDelaySec: 10,
-  maxReconnectAttempts: 999,
+  maxReconnectAttempts: 10,
   tpaTimeoutSec: 25,
-  viewDistance: 32,
   permittedUsers: [],
   quickCommands: [
     { id: 'qc_tpaccept', label: '⚡ /tpaccept', command: '/tpaccept', color: 'green' },
@@ -255,7 +254,6 @@ export const DEFAULT_BOTS = [
     host: 'paid34.skilloraclouds.com',
     port: 25593,
     version: '1.21.4',
-    viewDistance: 32,
     autoReconnect: true,
     antiAfkEnabled: true,
     antiAfkMode: 'active'
@@ -270,7 +268,6 @@ export const DEFAULT_BOTS = [
     host: 'paid34.skilloraclouds.com',
     port: 25593,
     version: '1.21.4',
-    viewDistance: 32,
     autoReconnect: true,
     antiAfkEnabled: true,
     antiAfkMode: 'active'
@@ -317,7 +314,6 @@ export function saveBot(botData) {
       host: botData.host || 'paid34.skilloraclouds.com',
       port: Number(botData.port) || 25593,
       version: botData.version || '1.21.4',
-      viewDistance: botData.viewDistance !== undefined ? Number(botData.viewDistance) : (bots[existingIndex]?.viewDistance || 32),
       autoReconnect: botData.autoReconnect !== false,
       antiAfkEnabled: botData.antiAfkEnabled !== false,
       antiAfkMode: botData.antiAfkMode || 'active',

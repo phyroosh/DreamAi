@@ -515,7 +515,6 @@ app.post(['/api/bots/:id/settings', '/api/settings'], (req, res) => {
       if (b.botConfig) {
         if (req.body.antiAfkMode !== undefined) b.botConfig.antiAfkMode = req.body.antiAfkMode;
         if (req.body.antiAfkEnabled !== undefined) b.botConfig.antiAfkEnabled = req.body.antiAfkEnabled;
-        if (req.body.viewDistance !== undefined) b.botConfig.viewDistance = Number(req.body.viewDistance);
         botPool.storage.saveBot(b.botConfig);
       }
     }
